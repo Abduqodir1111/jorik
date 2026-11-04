@@ -1,0 +1,419 @@
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+.contact-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.contact-line > b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  min-width: 0;
+}
+.contact-line .conversation-account {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  line-height: 16px;
+  margin: 0;
+  max-width: 100px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.contact-line .conversation-account svg {
+  display: block;
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+.conversation-title {
+  align-items: center;
+}
+.preview {
+  font-size: calc(var(--message-font-size, 16px) - 2px);
+}
+.bubble p {
+  font-size: var(--message-font-size, 16px);
+}
+.orders-page {
+  overflow: auto;
+  padding: 32px !important;
+}
+.orders-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.orders-heading h1 {
+  margin: 8px 0;
+}
+.orders-heading h1 small {
+  font-size: 16px;
+  color: var(--muted);
+}
+.orders-heading p {
+  color: var(--muted);
+  margin: 0;
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  font-weight: 700;
+  color: var(--muted);
+}
+.orders-page button,
+.order-drawer button,
+.order-history button,
+.font-options button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.order-group {
+  margin-bottom: 30px;
+}
+.order-group > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.order-group h2 {
+  font-size: 17px;
+  margin: 0;
+}
+.orders-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface, #fff);
+}
+.orders-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.orders-table th {
+  text-align: left;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  background: var(--hover);
+  padding: 13px 16px;
+}
+.orders-table td {
+  padding: 16px;
+  border-top: 1px solid var(--line);
+  vertical-align: top;
+}
+.orders-table td strong,
+.orders-table td small {
+  display: block;
+}
+.orders-table small {
+  color: var(--muted);
+  margin-top: 5px;
+  max-width: 240px;
+  overflow-wrap: anywhere;
+}
+.order-items {
+  white-space: pre-wrap;
+  min-width: 190px;
+  max-width: 350px;
+  overflow-wrap: anywhere;
+}
+.order-money {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.order-actions {
+  display: flex;
+  gap: 3px;
+}
+.order-actions button {
+  padding: 7px;
+  background: transparent;
+}
+.order-tag {
+  display: inline-block !important;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 5px;
+  padding: 4px 7px;
+  margin-top: 6px;
+  width: max-content;
+}
+.order-tag.paid {
+  background: #dcfce7;
+  color: #166534;
+}
+.order-tag.pickup {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+.order-tag.refused {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.order-refused {
+  background: color-mix(in srgb, #ef4444 5%, transparent);
+  color: var(--muted);
+}
+.order-refused .order-items {
+  text-decoration: line-through;
+}
+.order-paid:not(.order-refused) {
+  background: color-mix(in srgb, #22c55e 4%, transparent);
+}
+.orders-empty {
+  padding: 65px 24px;
+  text-align: center;
+  color: var(--muted);
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+}
+.orders-empty svg {
+  margin: auto;
+}
+.orders-empty h2 {
+  color: var(--ink);
+  font-size: 20px;
+}
+.order-drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  margin: 0;
+  height: 100dvh;
+  max-height: 100dvh;
+  width: min(520px, 100vw);
+  max-width: 100vw;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface, #fff);
+  color: var(--ink);
+  padding: 0;
+  box-shadow: -12px 0 70px #0002;
+}
+.order-drawer::backdrop,
+.order-history::backdrop {
+  background: #0f172a55;
+  backdrop-filter: blur(3px);
+}
+.order-drawer form {
+  padding: 26px;
+  display: grid;
+  gap: 16px;
+}
+.order-drawer header,
+.order-history header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.order-drawer h2 {
+  margin: 6px 0;
+  font-size: 23px;
+}
+.order-drawer label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+.order-drawer input:not([type="radio"]):not([type="checkbox"]),
+.order-drawer select,
+.order-drawer textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  box-sizing: border-box;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  background: var(--surface, #fff);
+  color: var(--ink);
+  border-radius: 9px;
+  font: inherit;
+  font-size: 14px;
+}
+.order-drawer input[readonly] {
+  background: var(--hover) !important;
+  color: var(--muted) !important;
+}
+.order-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.order-drawer .order-phone {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  align-items: center;
+  margin-top: 6px;
+}
+.order-drawer .order-phone.invalid {
+  border-color: #ef4444;
+}
+.order-phone > span {
+  padding-left: 12px;
+  font-size: 14px;
+}
+.order-drawer .order-phone input {
+  border: 0 !important;
+  margin: 0 !important;
+  min-width: 0;
+}
+.orders-error {
+  color: #dc2626;
+  font-size: 12px;
+  margin: 0;
+}
+.required {
+  color: #dc2626;
+}
+.order-drawer fieldset {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+.order-drawer legend {
+  font-size: 12px;
+  color: var(--muted);
+}
+.delivery-options {
+  display: flex;
+  gap: 22px;
+}
+.delivery-options label {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+.order-drawer .order-payment {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-top: 18px;
+}
+.order-drawer footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.history-button {
+  justify-self: start;
+  color: #2563eb;
+}
+.order-history {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface, #fff);
+  color: var(--ink);
+  width: min(600px, 90vw);
+  max-height: 80vh;
+  padding: 24px;
+}
+.order-history h2 {
+  font-size: 18px;
+}
+.order-history article {
+  border-top: 1px solid var(--line);
+  padding: 16px 0;
+}
+.order-history p {
+  white-space: pre-wrap;
+}
+.font-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.font-options .active {
+  background: #2563eb;
+  color: white;
+}
+.dark .order-drawer,
+.dark .order-history,
+.dark .orders-table-wrap {
+  --surface: #172033;
+}
+.dark .order-drawer input,
+.dark .order-drawer select,
+.dark .order-drawer textarea {
+  background: #101827 !important;
+}
+.dark .order-tag.paid {
+  background: #14532d;
+  color: #bbf7d0;
+}
+@media (max-width: 700px) {
+  .orders-page {
+    padding: 18px !important;
+  }
+  .orders-heading,
+  .order-group > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .order-drawer form {
+    padding: 20px;
+  }
+  .contact-line .conversation-account {
+    max-width: 80px;
+    font-size: 8px;
+  }
+}
+/* The order form stays beside the inbox; it never makes the chat inert. */
+.app {
+  --order-panel-width: 400px;
+}
+.app.has-order-panel > main {
+  margin-right: var(--order-panel-width);
+}
+.order-drawer {
+  width: var(--order-panel-width);
+  box-sizing: border-box;
+  overflow-y: auto;
+  z-index: 10;
+}
+.order-drawer form {
+  padding: 22px;
+}
+@media (max-width: 1250px) {
+  .has-order-panel .inbox.has-selection .conversation-list {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  .app.has-order-panel > main {
+    margin-right: 0;
+    padding-bottom: 48dvh;
+  }
+  .order-drawer {
+    inset: auto 0 0 54px;
+    width: auto;
+    height: 48dvh;
+    max-height: 48dvh;
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -8px 32px #0002;
+  }
+  .order-drawer form {
+    padding: 16px;
+  }
+}

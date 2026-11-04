@@ -1,0 +1,1 @@
+ALTER TABLE conversations ADD COLUMN draft_revision INTEGER NOT NULL DEFAULT 0;

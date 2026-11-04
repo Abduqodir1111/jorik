@@ -1,0 +1,1024 @@
+import { CustomFile } from "teleproto/client/uploads";
+import fs from "node:fs/promises";
+import path from "node:path";
+import {
+  photoInfo,
+  imageMime,
+  MAX_PHOTO_BYTES,
+  videoInfo,
+  videoMime,
+  MAX_VIDEO_BYTES,
+} from "./telegram-photos.js";
+import { Api, TelegramClient } from "teleproto";
+import { StringSession } from "teleproto/sessions";
+import { RECENT_CHAT_LIMIT } from "../shared/inbox.js";
+import { Logger } from "teleproto/extensions";
+import { NewMessage, Raw } from "teleproto/events";
+import bigInt from "big-integer";
+import { createHash, randomUUID } from "node:crypto";
+import type { Account, Message } from "../shared/types.js";
+import {
+  adapterFor,
+  DemoAdapter,
+  SendFailure,
+  type Adapter,
+} from "./adapters.js";
+import type { Store } from "./store.js";
+import { seal, unseal } from "./secrets.js";
+export type TelegramOptions = {
+  accountId?: "telegram-1" | "telegram-2";
+  attachmentDir?: string;
+  apiId: number;
+  apiHash: string;
+  encryptionKey: string;
+};
+
+type Stage = "phone" | "code" | "password" | "connected";
+type Peer = {
+  user_id: string;
+  access_hash: string;
+  name: string;
+  username: string;
+};
+export function telegramRandomId(key: string) {
+  return bigInt(
+    createHash("sha256").update(key).digest("hex").slice(0, 15),
+    16,
+  ).toString();
+}
+export function safeTelegramError(error: unknown) {
+  const e = error as { errorMessage?: string; seconds?: number; code?: number };
+  const code = e?.errorMessage ?? "";
+  const known: Record<string, string> = {
+    PHONE_NUMBER_INVALID: "Проверьте номер телефона в международном формате.",
+    PHONE_CODE_INVALID: "Неверный код. Введите код из последнего запроса.",
+    PHONE_CODE_EXPIRED: "Код истёк. Начните вход заново.",
+    PASSWORD_HASH_INVALID: "Неверный пароль двухэтапной защиты.",
+    API_ID_INVALID:
+      "Telegram отклонил API ID / API hash. Проверьте локальную конфигурацию.",
+    AUTH_KEY_UNREGISTERED: "Сессия Telegram отозвана. Выполните вход заново.",
+    SESSION_REVOKED: "Сессия Telegram отозвана. Выполните вход заново.",
+    USER_DEACTIVATED: "Аккаунт Telegram недоступен.",
+    USER_DEACTIVATED_BAN: "Аккаунт Telegram заблокирован.",
+    USER_IS_BLOCKED: "Отправка этому пользователю недоступна.",
+    YOU_BLOCKED_USER: "Этот пользователь заблокирован в Telegram.",
+    PEER_FLOOD:
+      "Telegram ограничил отправку сообщений. Проверьте ограничения аккаунта.",
+    CHAT_WRITE_FORBIDDEN: "Telegram не разрешает отправку в этот диалог.",
+    MESSAGE_TOO_LONG:
+      "Сообщение слишком длинное. Сократите его до 4096 символов.",
+    AUTH_RESTART: "Telegram просит начать вход заново.",
+    PHONE_NUMBER_BANNED: "Telegram не разрешает вход с этим номером.",
+    FROZEN_METHOD_INVALID: "Telegram ограничил операции этого аккаунта.",
+    ALLOW_PAYMENT_REQUIRED:
+      "Этот диалог требует оплаты в Telegram. Платная отправка в Jorik отключена.",
+  };
+  if (code.startsWith("FLOOD_WAIT") || code.startsWith("SLOWMODE_WAIT"))
+    return `Telegram просит подождать ${Math.max(1, e.seconds ?? 60)} сек.`;
+  return (
+    known[code] ??
+    "Не удалось выполнить запрос Telegram. Проверьте соединение; при необходимости повторите вход."
+  );
+}
+export class TelegramIntegration {
+  private get accountId() {
+    return this.opts.accountId ?? "telegram-1";
+  }
+  client?: TelegramClient;
+  stage: Stage = "phone";
+  error: string | null = null;
+  syncing = false;
+  closed = false;
+  private authenticated = false;
+  private loginBusy = false;
+  private phone?: string;
+  private phoneCodeHash?: string;
+  private loginOwner?: string;
+  private expiry?: ReturnType<typeof setTimeout>;
+  private poll?: ReturnType<typeof setInterval>;
+  private cooldownUntil = 0;
+  private codeViaApp = true;
+  private background?: Promise<void>;
+  private live: Promise<void> = Promise.resolve();
+  constructor(
+    private store: Store,
+    private opts: TelegramOptions,
+  ) {
+    store.db
+      .prepare(
+        "UPDATE accounts SET state='unconfigured',adapter='telegram-mtproto',error='Войдите в Telegram' WHERE id=?",
+      )
+      .run(this.accountId);
+    const fallback = store.resolveAdapter;
+    store.resolveAdapter = (a) =>
+      a.mode === "real" && a.id === this.accountId ? this.adapter : fallback(a);
+  }
+  get ready() {
+    return (
+      Number.isInteger(this.opts.apiId) &&
+      this.opts.apiId > 0 &&
+      /^[a-f0-9]{32}$/i.test(this.opts.apiHash) &&
+      /^[a-f0-9]{64}$/i.test(this.opts.encryptionKey)
+    );
+  }
+  status() {
+    return {
+      ready: this.ready,
+      stage: this.stage,
+      busy: this.loginBusy,
+      syncing: this.syncing,
+      error: this.error,
+      codeViaApp: this.codeViaApp,
+      scope:
+        "Личные диалоги; до 50 последних диалогов и 30 сообщений при открытии",
+      connected: this.authenticated && !!this.client?.connected,
+    };
+  }
+  private changed() {
+    if (!this.closed) this.store.changed();
+  }
+  private setState(state: Account["state"], error: string | null) {
+    if (this.closed) return;
+    this.error = error;
+    this.store.db
+      .prepare("UPDATE accounts SET state=?,error=? WHERE id=?")
+      .run(state, error, this.accountId);
+    this.changed();
+  }
+  private newClient(session = "") {
+    const logger = new Logger();
+    logger.setLevel("none" as never);
+    const c = new TelegramClient(
+      new StringSession(session),
+      this.opts.apiId,
+      this.opts.apiHash,
+      {
+        connectionRetries: 2,
+        reconnectRetries: 3,
+        requestRetries: 1,
+        timeout: 10,
+        retryDelay: 1000,
+        floodSleepThreshold: 0,
+        baseLogger: logger,
+        deviceModel: "Jorik · Mac",
+        appVersion: "1.1.0",
+        systemVersion: "Local desktop",
+        langCode: "ru",
+      },
+    );
+    c.onError = async () => {
+      if (this.authenticated)
+        this.setState(
+          "offline",
+          "Связь с Telegram прервана. Повторяем подключение.",
+        );
+    };
+    c.addEventHandler((event) => {
+      this.live = this.live
+        .then(async () => {
+          if (this.authenticated && !this.closed)
+            await this.importMessage(event.message, true);
+        })
+        .catch(() => {
+          this.setState(
+            "offline",
+            "Не удалось обновить диалог. Выполните синхронизацию.",
+          );
+        });
+    }, new NewMessage({}));
+    c.addEventHandler(
+      (update: Api.TypeUpdate) => {
+        if (
+          this.authenticated &&
+          !this.closed &&
+          update instanceof Api.UpdateMessageID
+        )
+          this.confirm(update.randomId?.toString() ?? "", String(update.id));
+      },
+      new Raw({ types: [Api.UpdateMessageID] }),
+    );
+    c.addEventHandler(
+      (update: Api.TypeUpdate) => {
+        if (
+          !this.authenticated ||
+          this.closed ||
+          !(update instanceof Api.UpdateReadHistoryOutbox) ||
+          !(update.peer instanceof Api.PeerUser)
+        )
+          return;
+        this.markRead(update.peer.userId.toString(), update.maxId);
+      },
+      new Raw({ types: [Api.UpdateReadHistoryOutbox] }),
+    );
+    c.addEventHandler(
+      (update: Api.TypeUpdate) => {
+        if (
+          this.authenticated &&
+          !this.closed &&
+          update instanceof Api.UpdateReadHistoryInbox &&
+          update.peer instanceof Api.PeerUser
+        )
+          this.markInboxRead(update.peer.userId.toString(), update.maxId);
+      },
+      new Raw({ types: [Api.UpdateReadHistoryInbox] }),
+    );
+    this.client = c;
+    return c;
+  }
+  private credentials() {
+    return { apiId: this.opts.apiId, apiHash: this.opts.apiHash };
+  }
+  async start(phone: string, owner: string) {
+    if (!this.ready)
+      throw new Error(
+        "Заполните TELEGRAM_API_ID, TELEGRAM_API_HASH и ключ шифрования на сервере.",
+      );
+    if (this.authenticated) throw new Error("Аккаунт уже подключён.");
+    if (this.loginBusy) throw new Error("Запрос входа уже выполняется.");
+    this.loginBusy = true;
+    this.error = null;
+    try {
+      await this.client?.destroy();
+      const c = this.newClient();
+      await c.connect();
+      const sent = await c.sendCode(this.credentials(), phone);
+      if (sent.emailRequired || sent.emailCodeSent)
+        throw new Error("EMAIL_FLOW_REQUIRED");
+      this.phone = phone;
+      this.phoneCodeHash = sent.phoneCodeHash;
+      this.loginOwner = owner;
+      this.codeViaApp = sent.isCodeViaApp;
+      this.stage = "code";
+      clearTimeout(this.expiry);
+      this.expiry = setTimeout(
+        () => {
+          this.phone = undefined;
+          this.phoneCodeHash = undefined;
+          this.loginOwner = undefined;
+          this.stage = "phone";
+          void this.client?.destroy();
+          this.setState(
+            "unconfigured",
+            "Время входа истекло. Введите номер ещё раз.",
+          );
+        },
+        10 * 60 * 1000,
+      );
+      this.changed();
+    } catch (e) {
+      this.error =
+        e instanceof Error && e.message === "EMAIL_FLOW_REQUIRED"
+          ? "Telegram запросил дополнительную проверку email. Этот способ входа пока не поддержан; сообщите об этом, не передавая код."
+          : safeTelegramError(e);
+      this.stage = "phone";
+      throw new Error(this.error);
+    } finally {
+      this.loginBusy = false;
+    }
+    return this.status();
+  }
+  async verify(value: string, owner: string, password = false) {
+    if (this.loginBusy) throw new Error("Проверка уже выполняется.");
+    if (owner !== this.loginOwner || !this.phoneCodeHash || !this.client)
+      throw new Error("Начните вход с номера телефона в этом окне.");
+    if (this.stage !== (password ? "password" : "code"))
+      throw new Error("Этот этап входа уже завершён.");
+    this.loginBusy = true;
+    this.error = null;
+    try {
+      if (password) {
+        await this.client.signInWithPassword(this.credentials(), {
+          password: async () => value,
+          onError: async (e) => {
+            throw e;
+          },
+        });
+      } else {
+        const result = await this.client.invoke(
+          new Api.auth.SignIn({
+            phoneNumber: this.phone!,
+            phoneCodeHash: this.phoneCodeHash,
+            phoneCode: value,
+          }),
+        );
+        if (result instanceof Api.auth.AuthorizationSignUpRequired)
+          throw new Error("SIGNUP_NOT_SUPPORTED");
+      }
+      await this.finishLogin();
+    } catch (e) {
+      if (
+        (e as { errorMessage?: string }).errorMessage ===
+        "SESSION_PASSWORD_NEEDED"
+      ) {
+        this.stage = "password";
+        this.changed();
+      } else {
+        this.error =
+          e instanceof Error && e.message === "SIGNUP_NOT_SUPPORTED"
+            ? "Нужен существующий Telegram-аккаунт. Регистрация здесь не выполняется."
+            : e instanceof Error && e.message === "ACCOUNT_IDENTITY_MISMATCH"
+              ? "Telegram 1 закреплён за другим аккаунтом. Войдите в прежний аккаунт, чтобы не смешать переписку."
+              : safeTelegramError(e);
+        throw new Error(this.error);
+      }
+    } finally {
+      this.loginBusy = false;
+      this.changed();
+    }
+    return this.status();
+  }
+  private async finishLogin() {
+    const c = this.client!;
+    const me = await c.getMe();
+    if (!(me instanceof Api.User) || me.bot)
+      throw new Error("Нужен личный аккаунт");
+    const identity = this.store.db
+      .prepare("SELECT user_id FROM telegram_sessions WHERE account_id=?")
+      .get(this.accountId) as { user_id: string | null } | undefined;
+    if (identity?.user_id && identity.user_id !== me.id.toString())
+      throw new Error("ACCOUNT_IDENTITY_MISMATCH");
+    const session = (c.session as StringSession).save();
+    this.store.db
+      .prepare(
+        "INSERT INTO telegram_sessions(account_id,ciphertext,user_id) VALUES(?,?,?) ON CONFLICT(account_id) DO UPDATE SET ciphertext=excluded.ciphertext,user_id=excluded.user_id",
+      )
+      .run(
+        this.accountId,
+        seal(session, this.opts.encryptionKey, this.accountId),
+        me.id.toString(),
+      );
+    clearTimeout(this.expiry);
+    this.phone = undefined;
+    this.phoneCodeHash = undefined;
+    this.loginOwner = undefined;
+    this.authenticated = true;
+    this.stage = "connected";
+    this.rememberUser(me);
+    this.ensureConversation(me.id.toString());
+    this.setState("connected", null);
+    this.runBackground();
+  }
+  restore() {
+    if (!this.ready) return;
+    const saved = this.store.db
+      .prepare("SELECT ciphertext FROM telegram_sessions WHERE account_id=?")
+      .get(this.accountId) as { ciphertext: string } | undefined;
+    if (!saved) return;
+    this.background = (async () => {
+      try {
+        const session = unseal(
+          saved.ciphertext,
+          this.opts.encryptionKey,
+          this.accountId,
+        );
+        const c = this.newClient(session);
+        await c.connect();
+        if (!(await c.checkAuthorization())) throw new Error("AUTH_REVOKED");
+        if (this.closed) return;
+        this.authenticated = true;
+        this.stage = "connected";
+        this.setState("connected", null);
+        await this.sync();
+        this.startPolling();
+      } catch {
+        this.setState(
+          "unconfigured",
+          "Не удалось восстановить сессию. Проверьте сеть и выполните вход, если сессия отозвана.",
+        );
+      }
+    })();
+  }
+  private runBackground() {
+    this.background = this.sync().catch((e) =>
+      this.setState("offline", safeTelegramError(e)),
+    );
+    this.startPolling();
+  }
+  private startPolling() {
+    clearInterval(this.poll);
+    this.poll = setInterval(() => {
+      if (!this.syncing && !this.closed && Date.now() >= this.cooldownUntil)
+        this.background = this.sync().catch((e) =>
+          this.setState("offline", safeTelegramError(e)),
+        );
+    }, 30000);
+  }
+  private rememberUser(user: Api.TypeUser) {
+    if (
+      !(user instanceof Api.User) ||
+      user.bot ||
+      user.deleted ||
+      user.id.toString() === "777000" ||
+      user.accessHash === undefined
+    )
+      return false;
+    const id = user.id.toString(),
+      name = user.self
+        ? "Избранное"
+        : [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+          user.username ||
+          "Клиент Telegram";
+    this.store.db
+      .prepare(
+        "INSERT INTO telegram_peers VALUES(?,?,?,?,?) ON CONFLICT(account_id,user_id) DO UPDATE SET access_hash=excluded.access_hash,name=excluded.name,username=excluded.username",
+      )
+      .run(
+        this.accountId,
+        id,
+        user.accessHash.toString(),
+        name,
+        user.username ?? "",
+      );
+    return true;
+  }
+  private ensureConversation(id: string) {
+    const p = this.store.db
+      .prepare("SELECT * FROM telegram_peers WHERE account_id=? AND user_id=?")
+      .get(this.accountId, id) as Peer | undefined;
+    if (!p) return;
+    this.store.db
+      .prepare(
+        "INSERT INTO conversations(id,account_id,external_id,name,username,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(account_id,external_id) DO UPDATE SET name=excluded.name,username=excluded.username",
+      )
+      .run(
+        randomUUID(),
+        this.accountId,
+        id,
+        p.name,
+        p.username,
+        new Date(0).toISOString(),
+      );
+  }
+  async profilePhoto(conversationId: string): Promise<Buffer | null> {
+    const c = this.store.conversation(conversationId);
+    if (c.accountId !== this.accountId)
+      throw new Error("Неверный аккаунт Telegram");
+    if (!this.authenticated || !this.client?.connected) return null;
+    const photo = await this.client.downloadProfilePhoto(
+      this.peer(c.externalId),
+      { isBig: false },
+    );
+    return Buffer.isBuffer(photo) ? photo : null;
+  }
+  private peer(id: string) {
+    const row = this.store.db
+      .prepare("SELECT * FROM telegram_peers WHERE account_id=? AND user_id=?")
+      .get(this.accountId, id) as Peer | undefined;
+    if (!row)
+      throw new SendFailure("Диалог ещё не синхронизирован с Telegram.");
+    return new Api.InputPeerUser({
+      userId: bigInt(row.user_id),
+      accessHash: bigInt(row.access_hash),
+    });
+  }
+  private async importMessage(m: Api.TypeMessage, unread: boolean) {
+    if (
+      !(m instanceof Api.Message) ||
+      !(m.peerId instanceof Api.PeerUser) ||
+      this.closed
+    )
+      return;
+    const id = m.peerId.userId.toString();
+    if (id === "777000") return;
+    if (
+      !this.store.db
+        .prepare(
+          "SELECT 1 FROM telegram_peers WHERE account_id=? AND user_id=?",
+        )
+        .get(this.accountId, id)
+    ) {
+      try {
+        const u = await this.client!.getEntity(m.peerId);
+        if (u instanceof Api.User) this.rememberUser(u);
+      } catch {
+        return;
+      }
+    }
+    this.ensureConversation(id);
+    const c = this.store.db
+      .prepare(
+        "SELECT id,telegram_read_inbox_max_id FROM conversations WHERE account_id=? AND external_id=?",
+      )
+      .get(this.accountId, id) as
+      { id: string; telegram_read_inbox_max_id: number } | undefined;
+    if (!c) return;
+    const photo = photoInfo(m);
+    const video = videoInfo(m);
+    const mediaInfo = photo || video;
+    const text =
+        m.message ||
+        mediaInfo?.name ||
+        "" ||
+        (m.media
+          ? "[Вложение Telegram — откройте оригинал в Telegram]"
+          : "[Служебное сообщение]"),
+      createdAt = new Date(m.date * 1000).toISOString();
+    let insertedIncoming = false;
+    this.store.db.transaction(() => {
+      const r = this.store.db
+        .prepare(
+          "INSERT OR IGNORE INTO messages(id,conversation_id,external_id,direction,text,status,created_at) VALUES(?,?,?,?,?,'sent',?)",
+        )
+        .run(
+          randomUUID(),
+          c.id,
+          String(m.id),
+          m.out ? "out" : "in",
+          text,
+          createdAt,
+        );
+      insertedIncoming =
+        !!r.changes && unread && !m.out && m.id > c.telegram_read_inbox_max_id;
+      if (r.changes)
+        this.store.db
+          .prepare(
+            "UPDATE conversations SET updated_at=MAX(updated_at,?),unread=unread+? WHERE id=?",
+          )
+          .run(
+            createdAt,
+            unread && !m.out && m.id > c.telegram_read_inbox_max_id ? 1 : 0,
+            c.id,
+          );
+    })();
+    // A native outgoing message handles earlier incoming IDs, never newer ones.
+    if (m.out) this.markInboxRead(id, m.id - 1);
+    if (insertedIncoming && Math.abs(Date.now() - m.date * 1000) < 60_000)
+      this.store.notifyIncoming();
+    if (mediaInfo) {
+      const saved = this.store.db
+        .prepare(
+          "SELECT id FROM messages WHERE conversation_id=? AND external_id=?",
+        )
+        .get(c.id, String(m.id)) as { id: string };
+      this.store.db
+        .prepare("UPDATE messages SET text=?,attachments=? WHERE id=?")
+        .run(
+          m.message || mediaInfo.name,
+          JSON.stringify([
+            {
+              kind: video ? "video" : "image",
+              ...mediaInfo,
+              url: `/api/telegram/${video ? "videos" : "photos"}/${saved.id}`,
+            },
+          ]),
+          saved.id,
+        );
+    }
+    this.changed();
+  }
+  private photos = new Map<string, Promise<{ bytes: Buffer; mime: string }>>();
+  private mediaActive = 0;
+  private mediaWaiting: (() => void)[] = [];
+  private async queuedPhoto(messageId: string, video: boolean) {
+    if (this.mediaActive >= 3)
+      await new Promise<void>((resolve) => this.mediaWaiting.push(resolve));
+    else this.mediaActive++;
+    try {
+      return await this.downloadPhoto(messageId, video);
+    } finally {
+      const next = this.mediaWaiting.shift();
+      if (next) next();
+      else this.mediaActive--;
+    }
+  }
+  async photo(
+    messageId: string,
+    video = false,
+  ): Promise<{ bytes: Buffer; mime: string }> {
+    const key = (video ? "video:" : "photo:") + messageId;
+    const existing = this.photos.get(key);
+    if (existing) return existing;
+    const task = this.queuedPhoto(messageId, video);
+    this.photos.set(key, task);
+    try {
+      return await task;
+    } finally {
+      this.photos.delete(key);
+    }
+  }
+  private async downloadPhoto(messageId: string, video: boolean) {
+    const limit = video ? MAX_VIDEO_BYTES : MAX_PHOTO_BYTES;
+    const mimeOf = video ? videoMime : imageMime;
+    const row = this.store.db
+      .prepare(
+        "SELECT m.external_id,c.external_id AS peer_id,m.attachments FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND c.account_id=?",
+      )
+      .get(messageId, this.accountId) as
+      { external_id: string; peer_id: string; attachments: string } | undefined;
+    if (
+      !row ||
+      !JSON.parse(row.attachments).some(
+        (a: { kind: string }) => a.kind === (video ? "video" : "image"),
+      )
+    )
+      throw new Error("Фото или видеозапись не найдена в этом аккаунте.");
+    const dir = this.opts.attachmentDir;
+    if (!dir) throw new Error("Не настроено локальное хранение вложений.");
+    const file = path.join(
+      dir,
+      "telegram-" +
+        createHash("sha256")
+          .update(this.accountId + ":" + messageId)
+          .digest("hex") +
+        (video ? ".mp4" : ".img"),
+    );
+    try {
+      const bytes = await fs.readFile(file);
+      return { bytes, mime: mimeOf(bytes) };
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    }
+    if (!this.authenticated || !this.client?.connected)
+      throw new Error(
+        "Для первой загрузки вложения нужно соединение с Telegram.",
+      );
+    try {
+      const messages = await this.client.getMessages(this.peer(row.peer_id), {
+        ids: [Number(row.external_id)],
+      });
+      const message = messages[0];
+      if (!(message instanceof Api.Message))
+        throw new Error("PHOTO_UNAVAILABLE");
+      const info = video ? videoInfo(message) : photoInfo(message);
+      if (!info) throw new Error("PHOTO_UNAVAILABLE");
+      if (info.size > limit) throw new Error("PHOTO_TOO_LARGE");
+      const bytes = await this.client.downloadMedia(message, {
+        signal: AbortSignal.timeout(video ? 180000 : 60000),
+        progressCallback: (received, total) => {
+          if (Number(received) > limit || Number(total) > limit)
+            throw new Error("PHOTO_TOO_LARGE");
+        },
+      });
+      if (!Buffer.isBuffer(bytes) || !bytes.length)
+        throw new Error("PHOTO_UNAVAILABLE");
+      if (bytes.length > limit) throw new Error("PHOTO_TOO_LARGE");
+      const mime = mimeOf(bytes);
+      await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+      const temporary = file + "." + randomUUID() + ".tmp";
+      try {
+        await fs.writeFile(temporary, bytes, { mode: 0o600 });
+        await fs.rename(temporary, file);
+      } finally {
+        await fs.rm(temporary, { force: true });
+      }
+      return { bytes, mime };
+    } catch (e) {
+      if (e instanceof Error && e.message === "PHOTO_TOO_LARGE")
+        throw new Error(
+          `Вложение больше ${limit / 1024 / 1024} МБ. Откройте оригинал в Telegram.`,
+        );
+      if (e instanceof Error && e.message === "PHOTO_UNAVAILABLE")
+        throw new Error(
+          "Вложение удалено, недоступно или имеет таймер самоуничтожения.",
+        );
+      throw new Error(
+        "Не удалось загрузить вложение из Telegram. Проверьте подключение и нажмите «Повторить».",
+      );
+    }
+  }
+  private confirm(randomId: string, externalId: string) {
+    const job = this.store.db
+      .prepare(
+        "SELECT o.message_id,o.id,o.conversation_id FROM outbox o JOIN conversations c ON c.id=o.conversation_id WHERE o.provider_random_id=? AND c.account_id=?",
+      )
+      .get(randomId, this.accountId) as
+      { message_id: string; id: string; conversation_id: string } | undefined;
+    if (!job) return;
+    this.store.db.transaction(() => {
+      this.store.db
+        .prepare(
+          "DELETE FROM messages WHERE conversation_id=? AND external_id=? AND id!=? AND id NOT IN (SELECT message_id FROM outbox)",
+        )
+        .run(job.conversation_id, externalId, job.message_id);
+      this.store.db
+        .prepare(
+          "UPDATE messages SET status='sent',external_id=?,error=NULL WHERE id=?",
+        )
+        .run(externalId, job.message_id);
+      this.store.db
+        .prepare("UPDATE outbox SET state='sent' WHERE id=?")
+        .run(job.id);
+    })();
+    this.changed();
+  }
+  private saveState(state: {
+    pts: number;
+    qts: number;
+    date: number;
+    seq: number;
+  }) {
+    this.store.db
+      .prepare(
+        "INSERT INTO telegram_state VALUES(?,?) ON CONFLICT(account_id) DO UPDATE SET state_json=excluded.state_json",
+      )
+      .run(
+        this.accountId,
+        JSON.stringify({
+          pts: state.pts,
+          qts: state.qts,
+          date: state.date,
+          seq: state.seq,
+        }),
+      );
+  }
+  private markInboxRead(peer: string, maxId: number) {
+    // A monotonic watermark survives reconnects and prevents history replay
+    // from making messages read on another device unread again.
+    // Count only messages beyond the watermark, including newer live arrivals.
+    const updated = this.store.db
+      .prepare(
+        `
+      UPDATE conversations SET telegram_read_inbox_max_id=?,
+        unread=MIN(unread, (SELECT COUNT(*) FROM messages
+          WHERE conversation_id=conversations.id AND direction='in'
+            AND CAST(external_id AS INTEGER)>?))
+      WHERE account_id=? AND external_id=? AND telegram_read_inbox_max_id<?
+    `,
+      )
+      .run(maxId, maxId, this.accountId, peer, maxId);
+    if (updated.changes) this.changed();
+  }
+  private markRead(peer: string, maxId: number) {
+    const updated = this.store.db
+      .prepare(
+        "UPDATE messages SET read_at=? WHERE read_at IS NULL AND direction='out' AND CAST(external_id AS INTEGER)<=? AND conversation_id IN (SELECT id FROM conversations WHERE account_id=? AND external_id=?)",
+      )
+      .run(new Date().toISOString(), maxId, this.accountId, peer);
+    if (updated.changes) this.changed();
+  }
+  private async difference() {
+    let saved = this.store.db
+      .prepare("SELECT state_json FROM telegram_state WHERE account_id=?")
+      .get(this.accountId) as { state_json: string } | undefined;
+    if (!saved) {
+      this.saveState(await this.client!.invoke(new Api.updates.GetState()));
+      return;
+    }
+    for (let i = 0; i < 20 && !this.closed; i++) {
+      const state = JSON.parse(saved.state_json);
+      const result = await this.client!.invoke(
+        new Api.updates.GetDifference({
+          pts: state.pts,
+          qts: state.qts,
+          date: state.date,
+        }),
+      );
+      if (result instanceof Api.updates.DifferenceTooLong) {
+        this.saveState(await this.client!.invoke(new Api.updates.GetState()));
+        this.error =
+          "Долгий перерыв: обновлены последние диалоги. Полная история может потребовать отдельной загрузки.";
+        return;
+      }
+      if (result instanceof Api.updates.DifferenceEmpty) {
+        this.saveState({ ...state, date: result.date, seq: result.seq });
+        return;
+      }
+      for (const u of result.users) this.rememberUser(u);
+      for (const m of result.newMessages) await this.importMessage(m, true);
+      for (const update of result.otherUpdates) {
+        if (update instanceof Api.UpdateMessageID)
+          this.confirm(update.randomId?.toString() ?? "", String(update.id));
+        if (
+          update instanceof Api.UpdateReadHistoryOutbox &&
+          update.peer instanceof Api.PeerUser
+        )
+          this.markRead(update.peer.userId.toString(), update.maxId);
+      }
+      for (const update of result.otherUpdates) {
+        if (
+          update instanceof Api.UpdateReadHistoryInbox &&
+          update.peer instanceof Api.PeerUser
+        )
+          this.markInboxRead(update.peer.userId.toString(), update.maxId);
+      }
+      const next =
+        result instanceof Api.updates.DifferenceSlice
+          ? result.intermediateState
+          : result.state;
+      this.saveState(next);
+      saved = { state_json: JSON.stringify(next) };
+      if (!(result instanceof Api.updates.DifferenceSlice)) return;
+    }
+  }
+  async sync() {
+    if (!this.authenticated || this.closed)
+      throw new Error("Сначала войдите в Telegram.");
+    if (this.syncing) return;
+    if (Date.now() < this.cooldownUntil)
+      throw new Error("Дождитесь завершения ограничения Telegram.");
+    this.syncing = true;
+    this.changed();
+    try {
+      const c = this.client!;
+      if (!c.connected) await c.connect();
+      await this.difference();
+      let imported = 0;
+      // Groups, channels and excluded users must not consume the personal-chat limit.
+      for await (const d of c.iterDialogs({})) {
+        if (this.closed) return;
+        if (d.entity instanceof Api.User && this.rememberUser(d.entity)) {
+          this.ensureConversation(d.entity.id.toString());
+          if (d.message) await this.importMessage(d.message, false);
+          if (d.dialog instanceof Api.Dialog) {
+            this.markRead(d.entity.id.toString(), d.dialog.readOutboxMaxId);
+            this.markInboxRead(d.entity.id.toString(), d.dialog.readInboxMaxId);
+          }
+          if (++imported >= RECENT_CHAT_LIMIT) break;
+        }
+      }
+      if (this.closed) return;
+      this.store.db
+        .prepare("UPDATE accounts SET last_sync=? WHERE id=?")
+        .run(new Date().toISOString(), this.accountId);
+      this.setState("connected", this.error);
+      (c.session as StringSession).save();
+    } catch (e) {
+      const secs = (e as { seconds?: number }).seconds;
+      if (secs) this.cooldownUntil = Date.now() + secs * 1000;
+      this.setState("offline", safeTelegramError(e));
+      throw e;
+    } finally {
+      this.syncing = false;
+      this.changed();
+    }
+  }
+  async history(id: string) {
+    const conv = this.store.conversation(id);
+    if (conv.accountId !== this.accountId || !this.authenticated)
+      throw new Error("Этот диалог не относится к подключённому Telegram.");
+    try {
+      const ms = await this.client!.getMessages(this.peer(conv.externalId), {
+        limit: 30,
+      });
+      for (const m of [...ms].reverse()) await this.importMessage(m, false);
+      return this.store.messages(id);
+    } catch (e) {
+      throw new Error(safeTelegramError(e));
+    }
+  }
+  readonly adapter: Adapter = {
+    capabilities: {
+      text: true,
+      images: true,
+      files: false,
+      voice: false,
+      history: true,
+      readReceipts: true,
+      replyWindowSeconds: null,
+      idempotency: true,
+    },
+    connectionState: (a) => a.state,
+    normalizeIncoming: (p) => new DemoAdapter().normalizeIncoming(p),
+    loadDialogs: async () => {
+      await this.sync();
+      return [];
+    },
+    loadHistory: async (_a, id) => {
+      const c = this.store
+        .conversations()
+        .find((c) => c.accountId === this.accountId && c.externalId === id);
+      if (c) await this.history(c.id);
+      return [];
+    },
+    reconnectAndSync: async () => {
+      await this.sync();
+      return [];
+    },
+    validateReply: (a, m) => {
+      if (
+        !this.authenticated ||
+        !this.client?.connected ||
+        a.state !== "connected"
+      )
+        throw new SendFailure(
+          "Нет подключения к Telegram. Откройте «Аккаунты» и восстановите связь.",
+        );
+      if ([...m.text].length > 4096)
+        throw new SendFailure("Максимум 4096 символов в сообщении Telegram.");
+      if (Date.now() < this.cooldownUntil)
+        throw new SendFailure(
+          "Telegram ограничил частоту запросов.",
+          false,
+          this.cooldownUntil - Date.now(),
+        );
+      const c = this.store.conversation(m.conversationId);
+      if (c.accountId !== this.accountId)
+        throw new SendFailure("Неверный аккаунт отправки.");
+      this.peer(c.externalId);
+    },
+    send: async (a, m, key) => {
+      this.adapter.validateReply(a, m);
+      const conv = this.store.conversation(m.conversationId),
+        random = telegramRandomId(key);
+      this.store.db
+        .prepare("UPDATE outbox SET provider_random_id=? WHERE message_id=?")
+        .run(random, m.id);
+      try {
+        const target = m.replyToId
+          ? this.store
+              .messages(m.conversationId)
+              .find((x) => x.id === m.replyToId)?.externalId
+          : undefined;
+        if (m.attachments.length) {
+          const id = m.attachments[0].url.split("/").at(-1);
+          const upload = this.store.db
+            .prepare(
+              "SELECT name,bytes FROM uploads WHERE id=? AND conversation_id=?",
+            )
+            .get(id, m.conversationId) as
+            { name: string; bytes: Buffer } | undefined;
+          if (!upload) throw new SendFailure("Файл для отправки не найден.");
+          try {
+            const sent = await this.client!.sendFile(
+              this.peer(conv.externalId),
+              {
+                file: new CustomFile(
+                  upload.name,
+                  upload.bytes.length,
+                  "",
+                  upload.bytes,
+                ),
+                caption: m.text,
+                replyTo: target ? Number(target) : undefined,
+              },
+            );
+            return { externalId: String(sent.id) };
+          } catch {
+            throw new SendFailure(
+              "Нет подтверждения отправки изображения. Проверьте Telegram перед повторной отправкой.",
+              true,
+            );
+          }
+        }
+        const result = await this.client!.invoke(
+          new Api.messages.SendMessage({
+            peer: this.peer(conv.externalId),
+            message: m.text,
+            randomId: bigInt(random),
+            noWebpage: true,
+            replyTo: target
+              ? new Api.InputReplyToMessage({ replyToMsgId: Number(target) })
+              : undefined,
+          }),
+        );
+        let id: string | undefined;
+        if (result instanceof Api.UpdateShortSentMessage)
+          id = String(result.id);
+        else if (
+          result instanceof Api.Updates ||
+          result instanceof Api.UpdatesCombined
+        ) {
+          for (const u of result.updates) {
+            if (
+              u instanceof Api.UpdateMessageID &&
+              u.randomId?.toString() === random
+            )
+              id = String(u.id);
+          }
+        }
+        if (!id) {
+          const saved = this.store.db
+            .prepare("SELECT external_id FROM messages WHERE id=?")
+            .get(m.id) as { external_id: string | null };
+          id = saved.external_id ?? undefined;
+        }
+        if (!id)
+          throw new SendFailure(
+            "Telegram не вернул подтверждение. Результат неизвестен; повтор автоматически не выполняется.",
+            true,
+          );
+        return { externalId: id };
+      } catch (e) {
+        if (e instanceof SendFailure) throw e;
+        const err = e as {
+          code?: number;
+          seconds?: number;
+          errorMessage?: string;
+        };
+        if (err.seconds) {
+          this.cooldownUntil = Date.now() + err.seconds * 1000;
+          throw new SendFailure(
+            safeTelegramError(e),
+            false,
+            err.seconds * 1000,
+          );
+        }
+        const definitive =
+          err.code !== undefined &&
+          err.code >= 400 &&
+          err.code < 500 &&
+          err.errorMessage !== "RANDOM_ID_DUPLICATE";
+        throw new SendFailure(safeTelegramError(e), !definitive);
+      }
+    },
+  };
+  async close() {
+    this.closed = true;
+    clearInterval(this.poll);
+    clearTimeout(this.expiry);
+    await this.client?.destroy();
+    await Promise.allSettled(this.photos.values());
+    await this.background?.catch(() => {});
+    await this.live.catch(() => {});
+  }
+}

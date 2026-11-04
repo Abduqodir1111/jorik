@@ -1,0 +1,69 @@
+# Dependencies, compiled output and caches
+node_modules/
+dist/
+dist-server/
+coverage/
+.vite/
+.cache/
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+
+# Local environment and credentials; publish blank templates only
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+!*.env.example
+.npmrc
+secrets/
+credentials/
+*.pem
+*.key
+*.p12
+*.pfx
+*.session
+*.session-*
+
+# Runtime data: conversations, attachments, tokens, provider sessions and backups
+/data/
+/backups/
+attachments/
+uploads/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Container archives, release artifacts and local logs
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.image-id
+*.log
+*.pid
+*.complete
+/tmp/
+/temp/
+
+# Local operations journal and screenshots with customer / NAS data
+/AGENTS.md
+/docs/
+# Keep reusable build helpers; one-off NAS migrations and SSH administration stay local.
+/deploy/synology/*
+!/deploy/synology/entrypoint.sh
+!/deploy/synology/package-code-update.py
+!/deploy/synology/jorik.env.example
+
+# OS and editor files
+.DS_Store
+._*
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

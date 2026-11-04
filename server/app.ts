@@ -1,0 +1,788 @@
+import { registerProfilePhotos } from "./profile-photos.js";
+import { registerOrders } from "./orders.js";
+import { imageMime } from "./telegram-photos.js";
+import { registerMetaWebhook } from "./meta-webhook.js";
+import { metaWebhookInbox } from "./meta-webhook-inbox.js";
+import { InstagramIntegration, type InstagramOptions } from "./instagram.js";
+import { TelegramIntegration, type TelegramOptions } from "./telegram.js";
+import Fastify from "fastify";
+import cookie from "@fastify/cookie";
+import rateLimit from "@fastify/rate-limit";
+import staticFiles from "@fastify/static";
+import { randomBytes, randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { z } from "zod";
+import type { ServerResponse } from "node:http";
+import { openDb } from "./db.js";
+import { Store } from "./store.js";
+import { checkPassword, hashToken } from "./auth.js";
+import type { Mode } from "../shared/types.js";
+export async function createApp(opts: {
+  dataDir: string;
+  mode: Mode;
+  worker?: boolean;
+  localAccess?: boolean;
+  publicBaseUrl?: string;
+  disableRateLimit?: boolean;
+  telegram?: TelegramOptions;
+  instagram?: InstagramOptions;
+  instagram2?: InstagramOptions;
+  instagram3?: InstagramOptions;
+  metaWebhook?: { verifyToken: string; appSecret: string };
+}) {
+  const app = Fastify({ logger: false, bodyLimit: 65536 });
+  app.get("/privacy", async (_request, reply) =>
+    reply
+      .type("text/html; charset=utf-8")
+      .send(readFileSync(path.resolve("public/privacy.html"), "utf8")),
+  );
+  app.get("/data-deletion", async (_request, reply) =>
+    reply
+      .type("text/html; charset=utf-8")
+      .send(readFileSync(path.resolve("public/data-deletion.html"), "utf8")),
+  );
+  await app.register(cookie);
+  const rememberedSessionSeconds = 365 * 86400;
+  const sessionCookie = {
+    httpOnly: true,
+    sameSite: "strict" as const,
+    path: "/",
+    secure:
+      !!opts.publicBaseUrl && new URL(opts.publicBaseUrl).protocol === "https:",
+  };
+  if (!opts.disableRateLimit)
+    await app.register(rateLimit, { max: 240, timeWindow: "1 minute" });
+  const db = openDb(opts.dataDir, opts.mode),
+    clients = new Set<ServerResponse>();
+  // A process crash after provider submission is ambiguous: never blindly resend.
+  db.transaction(() => {
+    db.prepare(
+      "UPDATE messages SET status='unknown',error='Сервер перезапустился во время отправки. Проверьте результат у провайдера.' WHERE id IN (SELECT message_id FROM outbox WHERE state='sending')",
+    ).run();
+    db.prepare("UPDATE outbox SET state='unknown' WHERE state='sending'").run();
+  })();
+
+  let publishTimer: ReturnType<typeof setTimeout> | undefined;
+  const publish = () => {
+    if (publishTimer || !clients.size) return;
+    publishTimer = setTimeout(() => {
+      publishTimer = undefined;
+      for (const c of clients) c.write("data: changed\n\n");
+    }, 40);
+  };
+  const store = new Store(db, publish, () => {
+    for (const c of clients) c.write("event: incoming\ndata: new\n\n");
+  });
+  const telegrams = new Map<string, TelegramIntegration>();
+  if (opts.mode === "real" && opts.telegram) {
+    for (const accountId of ["telegram-1", "telegram-2"] as const) {
+      const integration = new TelegramIntegration(store, {
+        ...opts.telegram,
+        accountId,
+        attachmentDir: path.join(opts.dataDir, "attachments"),
+      });
+      telegrams.set(accountId, integration);
+      integration.restore();
+    }
+  }
+  const instagrams = new Map<string, InstagramIntegration>();
+  const instagramOptions = new Map<string, InstagramOptions | undefined>([
+    ["instagram-1", opts.instagram],
+    ["instagram-2", opts.instagram2],
+    ["instagram-3", opts.instagram3],
+  ]);
+  if (opts.mode === "real") {
+    for (const [accountId, options] of [
+      ["instagram-1", opts.instagram],
+      ["instagram-2", opts.instagram2],
+      ["instagram-3", opts.instagram3],
+    ] as const) {
+      if (!options?.token) {
+        db.prepare(
+          "UPDATE accounts SET state='unconfigured',error=NULL WHERE id=?",
+        ).run(accountId);
+        continue;
+      }
+      const integration = new InstagramIntegration(store, {
+        ...options,
+        accountId,
+      });
+      instagrams.set(accountId, integration);
+      integration.start();
+    }
+  }
+  const instagramFor = (accountId: string) => {
+    const integration = instagrams.get(accountId);
+    if (!integration) throw new Error("Instagram этого аккаунта не настроен.");
+    return integration;
+  };
+  const receiveMeta = (entry: any) => {
+    let total = 0;
+    for (const [accountId, integration] of instagrams) {
+      const handled = integration.receiveWebhook(entry);
+      if (handled)
+        console.info("Meta webhook account", accountId, "handled", handled);
+      total += handled;
+    }
+    return total;
+  };
+  const inbox = metaWebhookInbox(db, receiveMeta, () =>
+    [...instagrams.keys()]
+      .filter((id) => instagramOptions.get(id)?.receiveMode === "webhook")
+      .every(
+        (id) =>
+          !!db
+            .prepare("SELECT 1 FROM instagram_identity WHERE account_id=?")
+            .get(id),
+      ),
+  );
+  await registerMetaWebhook(app, {
+    verifyToken: opts.metaWebhook?.verifyToken ?? "",
+    appSecret: opts.metaWebhook?.appSecret ?? "",
+    receive: receiveMeta,
+    enqueue: inbox.enqueue,
+  });
+  app.setErrorHandler((err, req, reply) => {
+    const e = err as Error & { statusCode?: number };
+    reply.code(e instanceof z.ZodError ? 400 : (e.statusCode ?? 400)).send({
+      error: e instanceof z.ZodError ? "Проверьте введённые данные" : e.message,
+    });
+  });
+  app.addHook("onRequest", async (req, reply) => {
+    reply
+      .header("X-Content-Type-Options", "nosniff")
+      .header("Referrer-Policy", "same-origin")
+      .header("X-Frame-Options", "DENY")
+      .header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+      .header("Content-Security-Policy-Report-Only", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; font-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
+    if (sessionCookie.secure)
+      reply.header("Strict-Transport-Security", "max-age=31536000");
+    if (!req.url.startsWith("/api/")) return;
+    reply.header("Cache-Control", "no-store");
+    const origin = req.headers.origin;
+    if (!["GET", "HEAD", "OPTIONS"].includes(req.method) && origin) {
+      const u = new URL(origin);
+      const localOrigin =
+        ["127.0.0.1", "localhost"].includes(u.hostname) &&
+        ["5173", String(process.env.PORT ?? 3001)].includes(u.port);
+      const publicOrigin = opts.publicBaseUrl
+        ? new URL(opts.publicBaseUrl).origin
+        : null;
+      if (!localOrigin && u.origin !== publicOrigin)
+        return reply.code(403).send({ error: "Недопустимый источник запроса" });
+    }
+    if (opts.localAccess) {
+      if (
+        !["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.ip) ||
+        !["127.0.0.1", "localhost", "[::1]"].includes(req.hostname)
+      )
+        return reply
+          .code(403)
+          .send({ error: "Тестовый доступ разрешён только локально." });
+      // Keep a browser-specific identity for the multi-step Telegram login.
+      if (!req.cookies.session) {
+        const token = randomBytes(32).toString("hex");
+        req.cookies.session = token;
+        reply.setCookie("session", token, {
+          httpOnly: true,
+          sameSite: "strict",
+          path: "/",
+        });
+      }
+      return;
+    }
+    if (req.url === "/api/login" || req.url === "/api/auth-status") return;
+    const session = db
+      .prepare(
+        "SELECT expires_at,EXISTS(SELECT 1 FROM remembered_sessions r WHERE r.token_hash=sessions.token_hash) AS remembered FROM sessions WHERE token_hash=? AND expires_at>?",
+      )
+      .get(hashToken(req.cookies.session ?? ""), Date.now()) as
+      { expires_at: number; remembered: number } | undefined;
+    if (!session)
+      return reply.code(401).send({ error: "Войдите в приложение" });
+    // Renew remembered devices during use; browsers still control cookie retention.
+    if (
+      session.remembered &&
+      session.expires_at <
+        Date.now() + (rememberedSessionSeconds - 86400) * 1000
+    ) {
+      db.prepare("UPDATE sessions SET expires_at=? WHERE token_hash=?").run(
+        Date.now() + rememberedSessionSeconds * 1000,
+        hashToken(req.cookies.session ?? ""),
+      );
+      reply.setCookie("session", req.cookies.session!, {
+        ...sessionCookie,
+        maxAge: rememberedSessionSeconds,
+      });
+    }
+  });
+  app.get("/api/auth-status", async () => ({
+    configured: !!db.prepare("SELECT 1 FROM owner").get(),
+    mode: opts.mode,
+    localAccess: !!opts.localAccess,
+  }));
+  app.post(
+    "/api/login",
+    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    async (req, reply) => {
+      const { password, remember } = z
+        .object({
+          password: z.string().max(256),
+          remember: z.boolean().default(false),
+        })
+        .parse(req.body);
+      const owner = db
+        .prepare("SELECT password_hash FROM owner WHERE id=1")
+        .get() as { password_hash: string } | undefined;
+      if (!owner || !checkPassword(password, owner.password_hash))
+        return reply.code(401).send({ error: "Неверный пароль" });
+      const token = randomBytes(32).toString("hex");
+      db.prepare("DELETE FROM sessions WHERE expires_at<?").run(Date.now());
+      const duration = remember ? rememberedSessionSeconds : 86400;
+      db.transaction(() => {
+        db.prepare(
+          "INSERT INTO sessions(token_hash,expires_at) VALUES(?,?)",
+        ).run(hashToken(token), Date.now() + duration * 1000);
+        if (remember)
+          db.prepare(
+            "INSERT INTO remembered_sessions(token_hash) VALUES(?)",
+          ).run(hashToken(token));
+      })();
+      reply.setCookie("session", token, {
+        ...sessionCookie,
+        maxAge: duration,
+      });
+      return { ok: true };
+    },
+  );
+  app.post("/api/logout", async (req, reply) => {
+    db.prepare("DELETE FROM sessions WHERE token_hash=?").run(
+      hashToken(req.cookies.session ?? ""),
+    );
+    reply.clearCookie("session", { path: "/" });
+    return { ok: true };
+  });
+  const accountQuery = (query: unknown) =>
+    z
+      .object({
+        account: z.enum(["telegram-1", "telegram-2"]).default("telegram-1"),
+      })
+      .parse(query).account;
+  const tg = (accountId: string) => {
+    const integration = telegrams.get(accountId);
+    if (!integration)
+      throw new Error("Вход в Telegram доступен только в реальном режиме.");
+    return integration;
+  };
+  app.get(
+    "/api/telegram/status",
+    async (req) =>
+      telegrams.get(accountQuery(req.query))?.status() ?? {
+        ready: false,
+        stage: "phone",
+        disabled: true,
+      },
+  );
+  app.post(
+    "/api/telegram/start",
+    { config: { rateLimit: { max: 3, timeWindow: "5 minutes" } } },
+    async (req) => {
+      const { phone } = z
+        .object({ phone: z.string().regex(/^\+[1-9]\d{6,14}$/) })
+        .strict()
+        .parse(req.body);
+      return tg(accountQuery(req.query)).start(
+        phone,
+        hashToken(req.cookies.session ?? ""),
+      );
+    },
+  );
+  app.post(
+    "/api/telegram/code",
+    { config: { rateLimit: { max: 10, timeWindow: "5 minutes" } } },
+    async (req) => {
+      const { code } = z
+        .object({ code: z.string().regex(/^\d{4,8}$/) })
+        .strict()
+        .parse(req.body);
+      return tg(accountQuery(req.query)).verify(
+        code,
+        hashToken(req.cookies.session ?? ""),
+      );
+    },
+  );
+  app.post(
+    "/api/telegram/password",
+    { config: { rateLimit: { max: 5, timeWindow: "5 minutes" } } },
+    async (req) => {
+      const { password } = z
+        .object({ password: z.string().min(1).max(256) })
+        .strict()
+        .parse(req.body);
+      return tg(accountQuery(req.query)).verify(
+        password,
+        hashToken(req.cookies.session ?? ""),
+        true,
+      );
+    },
+  );
+  app.post(
+    "/api/telegram/sync",
+    { config: { rateLimit: { max: 4, timeWindow: "1 minute" } } },
+    async (req) => {
+      try {
+        await tg(accountQuery(req.query)).sync();
+        return { ok: true };
+      } catch {
+        throw new Error(
+          "Синхронизация не выполнена. Причина указана в карточке аккаунта.",
+        );
+      }
+    },
+  );
+  app.post<{ Params: { id: string } }>(
+    "/api/telegram/history/:id",
+    async (req) =>
+      tg(store.conversation(req.params.id).accountId).history(req.params.id),
+  );
+  app.get<{ Params: { id: string } }>(
+    "/api/telegram/photos/:id",
+    async (req, reply) => {
+      const row = db
+        .prepare(
+          "SELECT c.account_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=?",
+        )
+        .get(req.params.id) as { account_id: string } | undefined;
+      if (!row) return reply.code(404).send({ error: "Фотография не найдена" });
+      const { bytes, mime } = await tg(row.account_id).photo(req.params.id);
+      return reply
+        .type(mime)
+        .header("Content-Disposition", "inline")
+        .send(bytes);
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/api/telegram/videos/:id",
+    async (req, reply) => {
+      const row = db
+        .prepare(
+          "SELECT c.account_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=?",
+        )
+        .get(req.params.id) as { account_id: string } | undefined;
+      if (!row) return reply.code(404).send({ error: "Видео не найдено" });
+      const { bytes, mime } = await tg(row.account_id).photo(
+        req.params.id,
+        true,
+      );
+      reply
+        .type(mime)
+        .header("Content-Disposition", "inline")
+        .header("Accept-Ranges", "bytes");
+      const range = req.headers.range;
+      if (!range) return reply.send(bytes);
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      const start = match?.[1]
+        ? Number(match[1])
+        : Math.max(0, bytes.length - Number(match?.[2]));
+      const end =
+        match?.[1] && match[2]
+          ? Math.min(Number(match[2]), bytes.length - 1)
+          : bytes.length - 1;
+      if (
+        !match ||
+        (!match[1] && !match[2]) ||
+        !Number.isSafeInteger(start) ||
+        !Number.isSafeInteger(end) ||
+        start > end ||
+        start >= bytes.length
+      )
+        return reply
+          .code(416)
+          .header("Content-Range", `bytes */${bytes.length}`)
+          .send();
+      return reply
+        .code(206)
+        .header("Content-Range", `bytes ${start}-${end}/${bytes.length}`)
+        .send(bytes.subarray(start, end + 1));
+    },
+  );
+  app.get<{ Params: { id: string; index: string } }>(
+    "/api/instagram/media/:id/:index",
+    async (req, reply) => {
+      const row = db
+        .prepare(
+          "SELECT c.account_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=?",
+        )
+        .get(req.params.id) as { account_id: string } | undefined;
+      if (!row) throw new Error("Вложение не найдено.");
+      const media = await instagramFor(row.account_id).media(
+        req.params.id,
+        Number(req.params.index),
+        req.headers.range,
+      );
+      reply
+        .code(media.status)
+        .type(media.mime)
+        .header("Accept-Ranges", "bytes")
+        .header("Content-Disposition", "inline");
+      if (media.range) reply.header("Content-Range", media.range);
+      if (media.length) reply.header("Content-Length", media.length);
+      return reply.send(media.stream);
+    },
+  );
+  app.post("/api/instagram/import-recent", async (req, reply) => {
+    const { accountId } = z
+      .object({
+        accountId: z.enum(["instagram-1", "instagram-2", "instagram-3"]),
+      })
+      .strict()
+      .parse(req.body);
+    const integration = instagramFor(accountId);
+    void integration.importRecent().catch(() => {});
+    return reply.code(202).send(integration.recentImportStatus());
+  });
+  app.post("/api/instagram/sync", async (req) => {
+    const { accountId } = z
+      .object({
+        accountId: z
+          .enum(["instagram-1", "instagram-2", "instagram-3"])
+          .optional(),
+      })
+      .strict()
+      .parse(req.body ?? {});
+    if (accountId) {
+      await instagramFor(accountId).sync();
+      return { ok: true };
+    }
+    if (!instagrams.size)
+      throw new Error("Добавьте токен Instagram на сервере.");
+    await Promise.all([...instagrams.values()].map((i) => i.sync()));
+    return { ok: true };
+  });
+  app.post<{ Params: { id: string } }>(
+    "/api/instagram/history/:id",
+    async (req) => {
+      return instagramFor(store.conversation(req.params.id).accountId).history(
+        req.params.id,
+      );
+    },
+  );
+  app.get("/api/state", async () => ({
+    mode: opts.mode,
+    localAccess: !!opts.localAccess,
+    accounts: store.accounts().map((a) =>
+      a.platform === "instagram"
+        ? {
+            ...a,
+            recentImport: instagrams.get(a.id)?.recentImportStatus(),
+            receiveMode: instagramOptions.get(a.id)?.receiveMode ?? "polling",
+            webhookConfigured:
+              !!opts.metaWebhook?.appSecret && !!opts.metaWebhook?.verifyToken,
+          }
+        : a,
+    ),
+    conversations: store.conversations(),
+    settings: Object.fromEntries(
+      (
+        db.prepare("SELECT * FROM settings").all() as {
+          key: string;
+          value: string;
+        }[]
+      ).map((s) => [s.key, s.value]),
+    ),
+  }));
+  app.get("/api/search", async (req) => {
+    const { q } = z.object({ q: z.string().max(200) }).parse(req.query);
+    const rows = db
+      .prepare(
+        "SELECT DISTINCT conversation_id AS id FROM messages WHERE instr(search_fold(text), ?) > 0",
+      )
+      .all(q.toLocaleLowerCase("ru")) as { id: string }[];
+    return { ids: rows.map((row) => row.id) };
+  });
+  app.get<{ Params: { id: string } }>(
+    "/api/conversations/:id/messages",
+    async (req) => {
+      store.conversation(req.params.id);
+      return store.messages(req.params.id);
+    },
+  );
+  app.put<{ Params: { id: string } }>(
+    "/api/conversations/:id/draft",
+    async (req) => {
+      store.conversation(req.params.id);
+      const { text, revision } = z
+        .object({
+          text: z.string().max(10000),
+          revision: z
+            .number()
+            .int()
+            .nonnegative()
+            .max(Number.MAX_SAFE_INTEGER)
+            .default(Date.now() * 1000),
+        })
+        .parse(req.body);
+      db.prepare(
+        "UPDATE conversations SET draft=?,draft_revision=? WHERE id=? AND draft_revision<=?",
+      ).run(text, revision, req.params.id, revision);
+      return { ok: true };
+    },
+  );
+  registerOrders(app, store);
+  registerProfilePhotos(app, store, async (id) => {
+    const c = store.conversation(id),
+      a = store.account(c.accountId);
+    if (a.mode !== "real") return null;
+    return a.platform === "instagram"
+      ? instagramFor(a.id).profilePhoto(id)
+      : (telegrams.get(a.id)?.profilePhoto(id) ?? null);
+  });
+  app.post<{ Params: { id: string } }>(
+    "/api/conversations/:id/read",
+    async (req) => {
+      const conv = store.conversation(req.params.id);
+      const { unread } = z.object({ unread: z.boolean() }).parse(req.body);
+      db.prepare("UPDATE conversations SET unread=? WHERE id=?").run(
+        unread ? 1 : 0,
+        req.params.id,
+      );
+      publish();
+      const account = store.account(conv.accountId);
+      if (
+        !unread &&
+        account.mode === "real" &&
+        account.adapter === "instagram-graph"
+      ) {
+        await instagramFor(account.id).markSeen(conv.id);
+      }
+      return { ok: true };
+    },
+  );
+  app.post<{ Params: { id: string } }>(
+    "/api/conversations/:id/messages",
+    async (req) => {
+      const b = z
+        .object({
+          text: z.string().trim().max(10000),
+          replyToId: z.string().uuid().optional(),
+          preserveDraft: z.boolean().optional(),
+          uploadId: z.string().uuid().optional(),
+          key: z.string().uuid(),
+        })
+        .strict()
+        .parse(req.body);
+      if (!b.text && !b.uploadId)
+        throw new Error("Добавьте текст или изображение.");
+      const id = store.enqueue(req.params.id, b.text, b.key, b);
+      publish();
+      return { id };
+    },
+  );
+
+  app.patch<{ Params: { id: string } }>(
+    "/api/conversations/:id/stage",
+    async (req) => {
+      store.conversation(req.params.id);
+      const { stage } = z
+        .object({ stage: z.enum(["", "new", "paid", "waiting"]) })
+        .parse(req.body);
+      db.prepare("UPDATE conversations SET stage=? WHERE id=?").run(
+        stage,
+        req.params.id,
+      );
+      publish();
+      return { ok: true };
+    },
+  );
+  app.put("/api/quick-replies", async (req) => {
+    const slots = z
+      .array(
+        z
+          .object({ title: z.string().max(40), text: z.string().max(4000) })
+          .strict(),
+      )
+      .length(4)
+      .parse(req.body);
+    db.prepare(
+      "INSERT INTO settings VALUES('quickReplies',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    ).run(JSON.stringify(slots));
+    publish();
+    return { ok: true };
+  });
+  app.post<{ Params: { id: string } }>(
+    "/api/conversations/:id/uploads",
+    { bodyLimit: 12 * 1024 * 1024 },
+    async (req) => {
+      store.conversation(req.params.id);
+      const body = z
+        .object({
+          name: z.string().min(1).max(200),
+          data: z
+            .string()
+            .regex(/^[A-Za-z0-9+/]*={0,2}$/)
+            .max(12 * 1024 * 1024),
+        })
+        .parse(req.body);
+      const bytes = Buffer.from(body.data, "base64");
+      if (!bytes.length || bytes.length > 8 * 1024 * 1024)
+        throw new Error("Максимальный размер изображения — 8 МБ.");
+      const mime = imageMime(bytes),
+        id = randomUUID();
+      if (!["image/jpeg", "image/png"].includes(mime))
+        throw new Error("Выберите JPG или PNG.");
+      db.prepare("INSERT INTO uploads VALUES(?,?,?,?,?,?)").run(
+        id,
+        req.params.id,
+        body.name,
+        mime,
+        bytes,
+        new Date().toISOString(),
+      );
+      // Remove abandoned drafts after a day; attachments in the outbox/history are retained.
+      db.prepare(
+        "DELETE FROM uploads WHERE created_at < ? AND NOT EXISTS(SELECT 1 FROM messages WHERE attachments LIKE '%' || uploads.id || '%')",
+      ).run(new Date(Date.now() - 86400000).toISOString());
+      return { id, name: body.name };
+    },
+  );
+  app.get<{ Params: { id: string } }>(
+    "/api/uploads/:id",
+    async (req, reply) => {
+      const row = db
+        .prepare("SELECT mime,bytes FROM uploads WHERE id=?")
+        .get(req.params.id) as { mime: string; bytes: Buffer } | undefined;
+      if (!row)
+        return reply.code(404).send({ error: "Изображение не найдено" });
+      return reply
+        .type(row.mime)
+        .header("Cache-Control", "private, max-age=86400")
+        .header("X-Content-Type-Options", "nosniff")
+        .send(row.bytes);
+    },
+  );
+  app.put("/api/settings", async (req) => {
+    const { ownerName } = z
+      .object({ ownerName: z.string().trim().min(1).max(80) })
+      .parse(req.body);
+    db.prepare(
+      "INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    ).run("ownerName", ownerName);
+    publish();
+    return { ok: true };
+  });
+  app.patch<{ Params: { id: string } }>("/api/accounts/:id", async (req) => {
+    store.account(req.params.id);
+    const { name, color } = z
+      .object({
+        name: z.string().trim().min(1).max(80),
+        color: z
+          .string()
+          .regex(/^#[0-9a-fA-F]{6}$/)
+          .optional(),
+      })
+      .parse(req.body);
+    db.prepare(
+      "UPDATE accounts SET name=?,color=COALESCE(?,color) WHERE id=?",
+    ).run(name, color?.toLowerCase() ?? null, req.params.id);
+    publish();
+    return { ok: true };
+  });
+  app.post("/api/demo/incoming", async (req, reply) => {
+    if (opts.mode !== "demo")
+      return reply.code(403).send({ error: "Демонстрация отключена" });
+    const { conversationId } = z
+      .object({ conversationId: z.string() })
+      .parse(req.body);
+    const c = store.conversation(conversationId);
+    if (store.account(c.accountId).state !== "connected")
+      return reply
+        .code(409)
+        .send({ error: "Сначала восстановите подключение" });
+    store.incoming(c.accountId, {
+      externalConversationId: c.externalId,
+      externalMessageId: randomUUID(),
+      name: c.name,
+      username: c.username,
+      text: "Спасибо за ответ! Подскажите, как оформить доставку?",
+    });
+    return { ok: true };
+  });
+  app.post<{ Params: { id: string } }>(
+    "/api/demo/accounts/:id/toggle",
+    async (req, reply) => {
+      if (opts.mode !== "demo")
+        return reply.code(403).send({ error: "Демонстрация отключена" });
+      const a = store.account(req.params.id),
+        connected = a.state !== "connected";
+      db.prepare(
+        "UPDATE accounts SET state=?,error=?,last_sync=CASE WHEN ? THEN ? ELSE last_sync END WHERE id=?",
+      ).run(
+        connected ? "connected" : "offline",
+        connected ? null : "Демо: соединение потеряно",
+        connected ? 1 : 0,
+        new Date().toISOString(),
+        a.id,
+      );
+      publish();
+      return { ok: true };
+    },
+  );
+  app.get("/api/events", async (req, reply) => {
+    reply.hijack();
+    const renewedCookie = reply.getHeader("set-cookie");
+    if (renewedCookie) reply.raw.setHeader("Set-Cookie", renewedCookie);
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    reply.raw.write("data: connected\n\n");
+    clients.add(reply.raw);
+    const timer = setInterval(() => {
+      const valid = db
+        .prepare("SELECT 1 FROM sessions WHERE token_hash=? AND expires_at>?")
+        .get(hashToken(req.cookies.session ?? ""), Date.now());
+      if (!opts.localAccess && !valid) reply.raw.end();
+      else reply.raw.write(": heartbeat\n\n");
+    }, 15000);
+    req.raw.on("close", () => {
+      clearInterval(timer);
+      clients.delete(reply.raw);
+    });
+  });
+  await app.register(staticFiles, {
+    root: path.join(opts.dataDir, "attachments"),
+    prefix: "/api/files/",
+    decorateReply: false,
+    index: false,
+  });
+  if (existsSync(path.resolve("dist"))) {
+    await app.register(staticFiles, { root: path.resolve("dist") });
+    app.setNotFoundHandler((req, reply) =>
+      req.url.startsWith("/api/")
+        ? reply.code(404).send({ error: "Маршрут не найден" })
+        : reply.sendFile("index.html"),
+    );
+  }
+  const timer =
+    opts.worker === false
+      ? undefined
+      : setInterval(() => void store.tick(), 500);
+  app.addHook("preClose", async () => {
+    clearTimeout(publishTimer);
+    inbox.close();
+    clearInterval(timer);
+    for (const c of clients) c.end();
+    await Promise.all([...telegrams.values()].map((t) => t.close()));
+    await Promise.all([...instagrams.values()].map((i) => i.close()));
+  });
+  app.addHook("onClose", async () => {
+    clearInterval(timer);
+    for (const c of clients) c.end();
+    while (store.busy) await new Promise((r) => setTimeout(r, 10));
+    db.close();
+  });
+  return { app, store, db };
+}
