@@ -27,3 +27,26 @@ export function instagramGraphMessageId(id: string) {
       (character) => ({ Z: "ZA", "+": "ZB", "/": "ZC", "=": "ZD" })[character]!,
     );
 }
+
+// Keep the local outbox row when Meta echoes the same message in another envelope.
+export function reconcileInstagramMessage(
+  db: import("./db.js").DB,
+  id: string,
+  conversationId: string,
+  externalId: string,
+) {
+  const key = instagramMessageKey(externalId);
+  db.prepare(
+    `UPDATE messages SET read_at=COALESCE(read_at,(SELECT MAX(read_at) FROM messages WHERE conversation_id=? AND (external_id=? OR instagram_key=?))) WHERE id=?`,
+  ).run(conversationId, externalId, key, id);
+  db.prepare(
+    `UPDATE messages SET reply_to_id=? WHERE conversation_id=? AND reply_to_id IN (SELECT id FROM messages WHERE conversation_id=? AND (external_id=? OR instagram_key=?) AND id!=? AND id NOT IN (SELECT message_id FROM outbox))`,
+  ).run(id, conversationId, conversationId, externalId, key, id);
+  db.prepare(
+    `DELETE FROM messages WHERE conversation_id=? AND (external_id=? OR instagram_key=?) AND id!=? AND id NOT IN (SELECT message_id FROM outbox)`,
+  ).run(conversationId, externalId, key, id);
+  db.prepare("UPDATE OR IGNORE messages SET instagram_key=? WHERE id=?").run(
+    key,
+    id,
+  );
+}

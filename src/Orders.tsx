@@ -68,6 +68,7 @@ export default function Orders({
   visible,
   context,
   openRequest,
+  closeRequest,
   onCloseRequest,
   onPanelChange,
   accounts,
@@ -78,6 +79,7 @@ export default function Orders({
   conversations: Conversation[];
   context?: OrderContext;
   openRequest: number;
+  closeRequest: number;
   onCloseRequest: () => void;
   onPanelChange: (open: boolean) => void;
 }) {
@@ -147,6 +149,7 @@ export default function Orders({
     if (history) historyDialog.current?.showModal();
     else historyDialog.current?.close();
   }, [history]);
+  useEffect(()=>{if(closeRequest)close();},[closeRequest]);
   function close() {
     setForm(null);
     setHistory(false);

@@ -1,8 +1,9 @@
+import SettingsView from "./SettingsView";
 import LogoutDialog from "./LogoutDialog";
 import StoreBadge from "./StoreBadge";
 import Orders, { type OrderContext } from "./Orders";
 import { useNotificationSound } from "./NotificationSound";
-import { QuickReplySettings, useOperator } from "./OperatorContext";
+import { useOperator } from "./OperatorContext";
 import { ChatCache } from "./chat-cache";
 import PlatformIcon from "./PlatformIcon";
 import AccountName from "./AccountName";
@@ -64,11 +65,14 @@ async function api<T = any>(
   return data;
 }
 export default function App() {
-  const { slots, hydrate, dark, toggleTheme, fontSize, setFontSize } =
+  const { slots, hydrate, dark, toggleTheme } =
     useOperator();
   const [orderContext, setOrderContext] = useState<OrderContext | undefined>();
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [orderRequest, setOrderRequest] = useState(0);
+  const [orderCloseRequest,setOrderCloseRequest]=useState(0);
+  const [clockNow,setClockNow]=useState(Date.now);
+  useEffect(()=>{const t=setInterval(()=>setClockNow(Date.now()),30000);return()=>clearInterval(t);},[]);
   const [orderPanelOpen, setOrderPanelOpen] = useState(false);
   const [replyTargets, setReplyTargets] = useState<
     Record<string, Message | undefined>
@@ -342,7 +346,7 @@ export default function App() {
   const instagramWindowClosed =
     a?.adapter === "instagram-graph" &&
     (!lastInstagramIncoming ||
-      Date.now() - Date.parse(lastInstagramIncoming.createdAt) >= 86400000);
+      clockNow - Date.parse(lastInstagramIncoming.createdAt) >= 86400000);
   const filtered = useMemo(() => {
     const query = q.toLocaleLowerCase();
     const matches = new Set(searchIds);
@@ -911,16 +915,11 @@ export default function App() {
                   >
                     <ArrowLeft size={20} />
                   </button>
-                  <Avatar name={c.name} conversationId={c.id} />
-                  <div>
-                    <h2>{c.name}</h2>
-                    <small>
-                      <span className={a.platform}>
-                        {a.platform === "telegram" ? "Telegram" : "Instagram"}
-                      </span>{" "}
-                      <span className="middle-dot">·</span>{" "}
-                      <StoreBadge name={a.name} color={a.color}/>
-                    </small>
+                  <span className={"workspace-platform "+a.platform}><PlatformIcon platform={a.platform}/></span>
+                  <div className="workspace-contact">
+                    <div className="workspace-contact-title"><h2>{c.username ? "@"+c.username.replace(/^@/,"") : c.name}</h2><StoreBadge name={a.name} color={a.color}/></div>
+                    <small>Диалог через {a.name}</small>
+                    {a.adapter==="instagram-graph" && <span className={"meta-reply-window "+(instagramWindowClosed?"closed":"")} title="Расчёт от последнего входящего сообщения; возможность ответа также зависит от разрешений Meta">{instagramWindowClosed?"Окно ответа Meta закрыто":`Окно Meta: ещё ${Math.max(1,Math.ceil((Date.parse(lastInstagramIncoming!.createdAt)+86400000-clockNow)/60000))} мин`}</span>}
                   </div>
                   <button
                     className="icon expand-chat"
@@ -946,13 +945,15 @@ export default function App() {
                   <button
                     className="icon create-order"
                     title="Создать заказ"
-                    aria-label="Создать заказ"
+                    aria-label={orderPanelOpen?"Свернуть панель заказа":"Создать заказ"}
+                    aria-pressed={orderPanelOpen}
                     onClick={() => {
+                      if(orderPanelOpen){setOrderCloseRequest(x=>x+1);return;}
                       setOrderContext({ conversation: c, account: a });
                       setOrderRequest((x) => x + 1);
                     }}
                   >
-                    <Package size={17} /><span>Заказ</span>
+                    <Package size={17} /><span>{orderPanelOpen?"Свернуть заказ":"Открыть заказ"}</span>
                   </button>
                   <button
                     title="Информация о клиенте"
@@ -1030,6 +1031,7 @@ export default function App() {
                     <span className="draft-status">{draftState}</span>
                   </div>
                   <div className="quick-replies flex gap-2 mb-2">
+                    <span className="quick-replies-label">Шаблоны:</span>
                     {slots.map((slot, i) => (
                       <button
                         key={i}
@@ -1445,88 +1447,11 @@ export default function App() {
           visible={page === "orders"}
           context={orderContext}
           openRequest={orderRequest}
+          closeRequest={orderCloseRequest}
           onCloseRequest={() => setOrderContext(undefined)}
           onPanelChange={setOrderPanelOpen}
         />
-        {page === "settings" && (
-          <div className="page-content settings-page">
-            <>
-              <span className="eyebrow">ВАШЕ ПРОСТРАНСТВО</span>
-              <h1>Настройки</h1>
-              <p className="page-description">
-                Простой и безопасный рабочий процесс.
-              </p>
-              <section className="settings-card">
-                <h2>Размер текста сообщений</h2>
-                <p>Применяется к сообщениям и превью в списке чатов.</p>
-                <div className="font-options">
-                  {([14, 16, 18] as const).map((size, i) => (
-                    <button
-                      key={size}
-                      aria-pressed={fontSize === size}
-                      className={fontSize === size ? "active" : ""}
-                      onClick={() => setFontSize(size)}
-                    >
-                      {["Маленький", "Средний", "Крупный"][i]}
-                    </button>
-                  ))}
-                </div>
-              </section>
-              {notificationSound.settings}
-              <QuickReplySettings />
-              <section className="settings-card">
-                <h2>Профиль владельца</h2>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const f = new FormData(e.currentTarget);
-                    action(() =>
-                      api("/settings", "PUT", { ownerName: f.get("name") }),
-                    );
-                  }}
-                >
-                  <label>
-                    Отображаемое имя
-                    <input
-                      name="name"
-                      defaultValue={ownerName}
-                      required
-                      maxLength={80}
-                    />
-                  </label>
-                  <button className="primary">Сохранить</button>
-                </form>
-              </section>
-              <section className="settings-card appearance-settings">
-                <h2>Оформление</h2><p>Светлая и тёмная тема сохраняются на этом устройстве.</p>
-                <button type="button" className="secondary" onClick={toggleTheme}>{dark ? <Sun size={16}/> : <Moon size={16}/>} {dark ? "Светлая тема" : "Тёмная тема"}</button>
-                {!localAccess && <button type="button" className="secondary" onClick={() => setLogoutOpen(true)}><LogOut size={16}/> Выйти из Jorik</button>}
-              </section>
-              <section className="settings-card">
-                <h2>Хранение и безопасность</h2>
-                <p>
-                  История, заказы и черновики сохраняются на сервере Jorik. Режим:{" "}
-                  <b>{mode === "demo" ? "демонстрационный" : "реальный"}</b>.
-                </p>
-                <p>Быстрые ответы доступны на всех устройствах. Тема, размер текста и звук сохраняются в этом браузере.</p>
-                <small>
-                  Приём сообщений работает на сервере независимо от этого устройства.
-                </small>
-              </section>
-              {mode === "demo" && (
-                <section className="settings-card">
-                  <h2>Проверка демонстрации</h2>
-                  <p>
-                    Нажмите «Тестовое входящее» в диалоге. Для ошибки отправьте{" "}
-                    <code>[ошибка]</code>, для неоднозначного результата —{" "}
-                    <code>[неизвестно]</code>. Потеря связи моделируется в
-                    разделе «Аккаунты».
-                  </p>
-                </section>
-              )}
-            </>
-          </div>
-        )}
+        {page === "settings" && <SettingsView ownerName={ownerName} online={online} mode={mode} sound={notificationSound} onSaveOwner={async name=>{await api("/settings","PUT",{ownerName:name});setOwnerName(name);}} onLogout={localAccess?undefined:()=>setLogoutOpen(true)}/>}
       </main>
       {logoutOpen && <LogoutDialog onCancel={() => setLogoutOpen(false)} onConfirm={logout}/>}
     </div>

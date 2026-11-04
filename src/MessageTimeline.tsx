@@ -116,6 +116,20 @@ export default memo(function MessageTimeline({
                   )}
                 </div>
               ))}
+              {m.externalId && (
+                <button
+                  className="reply-action"
+                  aria-label="Ответить на сообщение"
+                  title="Ответить"
+                  onClick={() => {
+                    onReply(m);
+                  }}
+                >
+                  <Reply size={16} />
+                </button>
+              )}
+              {m.error && <p className="message-error">{m.error}</p>}
+            </div>
               <div className="message-meta">
                 <time>{time(m.createdAt)}</time>
                 {m.direction === "out" && (
@@ -134,20 +148,6 @@ export default memo(function MessageTimeline({
                   </>
                 )}
               </div>
-              {m.externalId && (
-                <button
-                  className="reply-action"
-                  aria-label="Ответить на сообщение"
-                  title="Ответить"
-                  onClick={() => {
-                    onReply(m);
-                  }}
-                >
-                  <Reply size={16} />
-                </button>
-              )}
-              {m.error && <p className="message-error">{m.error}</p>}
-            </div>
           </div>
         </React.Fragment>
       ))}

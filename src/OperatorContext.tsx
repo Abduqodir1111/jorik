@@ -15,6 +15,7 @@ const Context = createContext<{
   updateSlot: (i: number, patch: Partial<QuickReply>) => void;
   hydrate: (value?: string) => void;
   saveStatus: string;
+  saveSlots: () => Promise<void>;
   dark: boolean;
   toggleTheme: () => void;
 }>(null!);
@@ -107,6 +108,18 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
         );
     }, 400);
   }
+  async function saveSlots() {
+    if(timer.current) clearTimeout(timer.current);
+    const next=latest.current, revision=++version.current;
+    setSaveStatus("Сохранение…");
+    const task=chain.current.catch(()=>{}).then(async()=>{
+      const r=await fetch("/api/quick-replies",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(next)});
+      if(!r.ok) throw Error("Не удалось сохранить быстрые ответы");
+      if(version.current===revision){dirty.current=false;setSaveStatus("Сохранено");}
+    });
+    chain.current=task.catch(()=>{setSaveStatus("Не удалось сохранить. Повторите попытку.");});
+    await task;
+  }
   useEffect(() => {
     const flush = () => {
       if (dirty.current)
@@ -132,6 +145,7 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
         updateSlot,
         hydrate,
         saveStatus,
+        saveSlots,
         dark,
         toggleTheme: () => setDark((x) => !x),
       }}

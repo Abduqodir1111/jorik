@@ -1,3 +1,4 @@
+import { reconcileInstagramMessage } from "./instagram-message-key.js";
 import { Readable } from "node:stream";
 import { RECENT_CHAT_LIMIT } from "../shared/inbox.js";
 import {
@@ -71,14 +72,16 @@ export class InstagramIntegration {
     store.db.transaction(() => {
       const rows = store.db
         .prepare(
-          "SELECT m.id,m.external_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE c.account_id=? AND m.external_id IS NOT NULL AND m.instagram_key IS NULL",
+          "SELECT m.id,m.external_id,m.conversation_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE c.account_id=? AND m.external_id IS NOT NULL AND m.instagram_key IS NULL",
         )
-        .all(this.accountId) as { id: string; external_id: string }[];
+        .all(this.accountId) as { id: string; external_id: string; conversation_id: string }[];
       const update = store.db.prepare(
         "UPDATE OR IGNORE messages SET instagram_key=? WHERE id=?",
       );
-      for (const row of rows)
-        update.run(instagramMessageKey(row.external_id), row.id);
+      for (const row of rows) {
+        if(store.db.prepare("SELECT 1 FROM outbox WHERE message_id=?").get(row.id)) reconcileInstagramMessage(store.db,row.id,row.conversation_id,row.external_id);
+        else update.run(instagramMessageKey(row.external_id), row.id);
+      }
     })();
     const fallback = store.resolveAdapter;
     store.resolveAdapter = (a) =>

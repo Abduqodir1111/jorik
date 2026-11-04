@@ -1,0 +1,298 @@
+import { useState } from "react";
+import { Check, LogOut, Volume2, Sun, Moon, Save, Server } from "lucide-react";
+import { useOperator } from "./OperatorContext";
+import type { Mode } from "../shared/types";
+import "./settings-view.css";
+
+type Props = {
+  ownerName: string;
+  online: boolean;
+  mode: Mode;
+  sound: {
+    enabled: boolean;
+    setEnabled: (v: boolean) => void;
+    play: (preview?: boolean) => void;
+    status: string;
+  };
+  onSaveOwner: (name: string) => Promise<void>;
+  onLogout?: () => void;
+};
+export default function SettingsView({
+  ownerName,
+  online,
+  mode,
+  sound,
+  onSaveOwner,
+  onLogout,
+}: Props) {
+  const {
+    fontSize,
+    setFontSize,
+    dark,
+    toggleTheme,
+    slots,
+    updateSlot,
+    saveStatus,
+    saveSlots,
+  } = useOperator();
+  const [name, setName] = useState(ownerName),
+    [busy, setBusy] = useState(false),
+    [result, setResult] = useState("");
+  async function save() {
+    if (busy) return;
+    if (!name.trim()) {
+      setResult("Введите отображаемое имя.");
+      return;
+    }
+    setBusy(true);
+    setResult("");
+    try {
+      await saveSlots();
+      await onSaveOwner(name.trim());
+      setResult("Все настройки сохранены");
+    } catch (e) {
+      setResult(
+        e instanceof Error ? e.message : "Не удалось сохранить настройки",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  const saveButton = (label: string) => (
+    <button
+      type="button"
+      className="primary settings-save"
+      disabled={busy || !name.trim()}
+      onClick={() => void save()}
+    >
+      <Save size={15} />
+      {busy ? "Сохраняем…" : label}
+    </button>
+  );
+  return (
+    <div className="page-content settings-page redesigned-settings">
+      <div className="settings-inner">
+        <header className="settings-title">
+          <div>
+            <span className="eyebrow">ВАШЕ ПРОСТРАНСТВО</span>
+            <h1>Настройки</h1>
+            <p>
+              Управление диалогами, быстрыми ответами и рабочим пространством.
+            </p>
+          </div>
+          {saveButton("Сохранить изменения")}
+        </header>
+        <section className="settings-card preferences-card">
+          <header>
+            <h2>Внешний вид и уведомления</h2>
+            <p>
+              Шрифт, тема и звук сохраняются на этом устройстве сразу после
+              изменения.
+            </p>
+          </header>
+          <div className="preferences-grid">
+            <div>
+              <label>Размер текста сообщений</label>
+              <div
+                className="settings-segments"
+                role="group"
+                aria-label="Размер текста"
+              >
+                {[14, 16, 18].map((size, i) => (
+                  <button
+                    type="button"
+                    key={size}
+                    aria-pressed={fontSize === size}
+                    onClick={() => setFontSize(size)}
+                  >
+                    {["Мелкий", "Средний", "Крупный"][i]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label>Звуковое уведомление</label>
+              <div className="sound-controls">
+                <button
+                  type="button"
+                  className="settings-switch"
+                  role="switch"
+                  aria-label="Звук новых сообщений"
+                  aria-checked={sound.enabled}
+                  onClick={() => sound.setEnabled(!sound.enabled)}
+                >
+                  <span />
+                </button>
+                <span>{sound.enabled ? "Включён" : "Отключён"}</span>
+                <button
+                  type="button"
+                  className="sound-preview"
+                  onClick={() => sound.play(true)}
+                >
+                  <Volume2 size={14} />
+                  Тест звука
+                </button>
+              </div>
+              <small>Мягкий двойной сигнал для Telegram и Instagram.</small>
+              {sound.status && <small role="status">{sound.status}</small>}
+            </div>
+          </div>
+          <div className="theme-row">
+            <div>
+              <label>Цветовое оформление</label>
+              <p>Выберите удобную тему для работы.</p>
+            </div>
+            <div
+              className="settings-segments"
+              role="group"
+              aria-label="Цветовое оформление"
+            >
+              <button
+                type="button"
+                aria-pressed={!dark}
+                onClick={() => {
+                  if (dark) toggleTheme();
+                }}
+              >
+                <Sun size={14} />
+                Светлая
+              </button>
+              <button
+                type="button"
+                aria-pressed={dark}
+                onClick={() => {
+                  if (!dark) toggleTheme();
+                }}
+              >
+                <Moon size={14} />
+                Тёмная
+              </button>
+            </div>
+          </div>
+        </section>
+        <section className="settings-card replies-card">
+          <header>
+            <div>
+              <h2>Быстрые ответы на панели</h2>
+              <p>
+                Кнопка вставляет текст. Ctrl + 1–4 сразу отправляет шаблон в
+                чат.
+              </p>
+            </div>
+            <span className="slot-count">4 слота шаблонов</span>
+          </header>
+          <div className="settings-slots">
+            {slots.map((slot, i) => (
+              <fieldset key={i}>
+                <legend>Слот {i + 1}</legend>
+                <kbd>Ctrl + {i + 1}</kbd>
+                <label>
+                  Название кнопки
+                  <input
+                    aria-label={`Название слота ${i + 1}`}
+                    maxLength={40}
+                    value={slot.title}
+                    placeholder="Например, 🚚 Доставка"
+                    onChange={(e) => {
+                      setResult("");
+                      updateSlot(i, { title: e.target.value });
+                    }}
+                  />
+                </label>
+                <label>
+                  Текст шаблона
+                  <textarea
+                    aria-label={`Текст слота ${i + 1}`}
+                    rows={2}
+                    maxLength={4000}
+                    value={slot.text}
+                    placeholder="Текст ответа клиенту…"
+                    onChange={(e) => {
+                      setResult("");
+                      updateSlot(i, { text: e.target.value });
+                    }}
+                  />
+                </label>
+              </fieldset>
+            ))}
+          </div>
+          <small role="status">
+            {saveStatus ||
+              "Быстрые ответы автоматически сохраняются на сервере."}
+          </small>
+        </section>
+        <section className="settings-card profile-card">
+          <header>
+            <h2>Профиль и синхронизация</h2>
+            <p>Имя владельца и состояние соединения с сервером Jorik.</p>
+          </header>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
+          >
+            <label>
+              Отображаемое имя
+              <div className="profile-name-row">
+                <input
+                  required
+                  maxLength={80}
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setResult("");
+                  }}
+                  aria-label="Отображаемое имя"
+                  placeholder="Имя владельца или оператора"
+                />
+                {saveButton("Сохранить")}
+              </div>
+            </label>
+          </form>
+          <div className="settings-server">
+            <div>
+              <strong>
+                <Server size={16} />
+                <span
+                  className={online ? "server-dot" : "server-dot offline"}
+                />
+                {online
+                  ? "Соединение с Jorik активно"
+                  : "Нет соединения с Jorik"}
+              </strong>
+              <p>
+                История, заказы и черновики хранятся на сервере.
+                {mode === "demo" ? " Демонстрационный режим." : ""}
+              </p>
+            </div>
+            {onLogout && (
+              <button
+                type="button"
+                className="settings-logout"
+                onClick={onLogout}
+              >
+                <LogOut size={15} />
+                Выйти из Jorik
+              </button>
+            )}
+          </div>
+          <small>
+            Приём сообщений продолжается на сервере после выхода из аккаунта.
+          </small>
+        </section>
+        <footer className="settings-footer">
+          <p role="status">
+            {result && (
+              <>
+                {result === "Все настройки сохранены" && <Check size={15} />}
+                {result}
+              </>
+            )}
+          </p>
+          {saveButton("Сохранить все настройки")}
+        </footer>
+      </div>
+    </div>
+  );
+}

@@ -14,3 +14,5 @@ import "./orders.css";
 import "./unified.css";
 
 import "./order-form.css";
+
+import "./chat-workspace.css";

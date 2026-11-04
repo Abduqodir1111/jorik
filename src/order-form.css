@@ -422,3 +422,34 @@
     font-size: 9px;
   }
 }
+
+/* Order reference: even 50/50 rows, softer cards, aligned 38px controls. */
+.app { --order-panel-width:420px; }
+.compact-order-drawer .compact-order-form { padding:16px 20px; gap:14px; }
+.compact-order-drawer .compact-order-form > header { margin:-16px -20px 0; top:-16px; padding:16px 20px 10px; border-bottom:0; }
+.compact-order-form header h2 { font-size:19px; }
+.compact-order-form .eyebrow { color:#0369a1; font-size:11px; font-weight:700; }
+.compact-order-form label,.compact-field { font-size:12px; font-weight:600; color:var(--ink); }
+.compact-order-form .compact-grid { grid-template-columns:1fr 1fr; gap:12px; }
+.compact-order-form .order-identity { min-height:38px; padding:0 10px; border:1px solid var(--line); border-radius:12px; }
+.compact-order-form .order-identity > a { font-weight:700; }
+.compact-order-drawer .compact-order-form input:not([type="checkbox"]):not([type="radio"]),.compact-order-drawer .compact-order-form select { height:38px; min-height:38px; border-radius:12px; }
+.compact-order-form .type-segments,.compact-order-form .compact-phone { height:38px; border-radius:12px; }
+.compact-order-form .compact-phone { font-family:ui-monospace,SFMono-Regular,monospace; }
+.compact-order-form .type-segments button { border-radius:8px; font-weight:600; }
+.compact-order-form .compact-delivery { gap:14px; }
+.compact-order-form .location-input,.compact-order-form .compact-amount { height:38px; border-radius:12px; }
+.compact-order-drawer .compact-order-form .location-input input,.compact-order-drawer .compact-order-form .compact-amount input { height:36px; min-height:36px; }
+.compact-money-row .payment-toggle { height:38px; min-width:96px; border-radius:12px; background:#ecfdf5; border-color:#a7f3d0; color:#334155; }
+.compact-money-row .payment-toggle.paid { color:#064e3b; border-color:#6ee7b7; }
+.payment-toggle.paid svg { color:#10b981; }
+.compact-order-drawer .compact-order-form textarea { min-height:58px; border-radius:12px; }
+.compact-order-form footer > button:first-child { min-height:40px; border:1px solid var(--line); border-radius:12px; padding:8px 16px; }
+.compact-order-form footer .primary { min-height:40px; border-radius:12px; background:#3b82f6; }
+.dark .compact-money-row .payment-toggle { background:#064e3b55; color:#a7f3d0; border-color:#065f46; }
+@media(max-width:767px) {
+ .compact-order-drawer .compact-order-form { padding:12px; gap:12px; }
+ .compact-order-drawer .compact-order-form > header { margin:-12px -12px 0; top:-12px; padding:16px 12px 8px; }
+ .compact-order-drawer .compact-order-form input:not([type="checkbox"]):not([type="radio"]),.compact-order-drawer .compact-order-form select { font-size:16px; }
+}
+.compact-order-drawer .compact-order-form > footer { bottom:0; }

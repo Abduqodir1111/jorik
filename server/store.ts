@@ -1,3 +1,4 @@
+import { reconcileInstagramMessage } from "./instagram-message-key.js";
 import { randomUUID } from "node:crypto";
 import type { DB } from "./db.js";
 import type { Account, Conversation, Message } from "../shared/types.js";
@@ -210,6 +211,7 @@ export class Store {
         adapter.validateReply(a, m);
         const result = await adapter.send(a, m, job.idempotency_key);
         this.db.transaction(() => {
+          if (a.platform === "instagram") reconcileInstagramMessage(this.db,m.id,c.id,result.externalId);
           // A live Telegram echo may arrive before the RPC response.
           this.db
             .prepare(

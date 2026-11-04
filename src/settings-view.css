@@ -1,0 +1,328 @@
+.redesigned-settings {
+  background: var(--canvas);
+  padding: 28px;
+}
+.settings-inner {
+  max-width: 896px;
+  margin: 0 auto;
+  display: grid;
+  gap: 20px;
+}
+.settings-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-title h1 {
+  margin: 3px 0 4px;
+  font-size: 25px;
+  letter-spacing: -0.6px;
+}
+.settings-title p,
+.redesigned-settings .settings-card p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 4px 0 0;
+}
+.redesigned-settings .settings-card {
+  padding: 20px;
+  border-radius: 16px;
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 3px #0f172a05;
+}
+.redesigned-settings .settings-card > header {
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.redesigned-settings .settings-card h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  margin: 0;
+  font-weight: 750;
+}
+.redesigned-settings label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.preferences-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+.settings-segments {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  height: 38px;
+  border: 1px solid var(--line);
+  background: var(--hover);
+  border-radius: 12px;
+  margin-top: 7px;
+}
+.settings-segments button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.settings-segments button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: 700;
+  box-shadow: 0 1px 3px #0001;
+}
+.sound-controls {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  margin-top: 7px;
+  font-size: 12px;
+}
+.settings-switch {
+  width: 36px;
+  height: 22px;
+  padding: 3px;
+  border-radius: 20px;
+  background: #94a3b8;
+}
+.settings-switch span {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.15s;
+}
+.settings-switch[aria-checked="true"] {
+  background: #2563eb;
+}
+.settings-switch[aria-checked="true"] span {
+  transform: translateX(14px);
+}
+.sound-preview {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+.redesigned-settings small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  margin-top: 7px;
+}
+.theme-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  border-top: 1px solid var(--line);
+  margin-top: 18px;
+  padding-top: 16px;
+}
+.theme-row .settings-segments {
+  width: 256px;
+  flex-shrink: 0;
+  margin: 0;
+}
+.replies-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.slot-count {
+  color: #0369a1;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.settings-slots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.settings-slots fieldset {
+  position: relative;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--hover);
+}
+.settings-slots legend {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 5px;
+}
+.settings-slots kbd {
+  position: absolute;
+  right: 14px;
+  top: -9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 10px;
+}
+.settings-slots label + label {
+  margin-top: 10px;
+}
+.redesigned-settings .settings-card input,
+.redesigned-settings .settings-card textarea {
+  width: 100%;
+  display: block;
+  margin-top: 5px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  padding: 9px 11px;
+}
+.redesigned-settings .settings-card input {
+  height: 38px;
+}
+.redesigned-settings .settings-card textarea {
+  min-height: 58px;
+  max-height: 180px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.profile-name-row {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  max-width: 540px;
+}
+.profile-name-row input {
+  flex: 1;
+  min-width: 0;
+}
+.redesigned-settings .settings-save {
+  min-height: 38px;
+  padding: 9px 16px;
+  border-radius: 12px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.settings-server {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  margin-top: 20px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--hover);
+}
+.settings-server strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.server-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+}
+.server-dot.offline {
+  background: #f59e0b;
+}
+.settings-logout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.settings-logout:hover {
+  color: #e11d48;
+  border-color: #fda4af;
+}
+.settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 20px;
+}
+.settings-footer p {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink);
+}
+@media (max-width: 767px) {
+  .redesigned-settings {
+    padding: 16px 12px 24px;
+  }
+  .settings-title,
+  .theme-row,
+  .settings-server {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .preferences-grid,
+  .settings-slots {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .theme-row .settings-segments {
+    width: 100%;
+  }
+  .redesigned-settings .settings-card {
+    padding: 16px;
+  }
+  .settings-title .settings-save {
+    align-self: start;
+  }
+  .redesigned-settings .settings-card input,
+  .redesigned-settings .settings-card textarea {
+    font-size: 16px;
+  }
+  .settings-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .profile-name-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .replies-card > header {
+    align-items: start;
+    flex-direction: column;
+  }
+}
+.redesigned-settings .settings-card { width:100%; max-width:none; }

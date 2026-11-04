@@ -39,7 +39,8 @@ export function useNotificationSound() {
     if (preview) void ctx.resume().then(start).catch(() => setStatus('Браузер заблокировал звук. Разрешите воспроизведение для сайта.'));
     else start();
   };
-  return { play, settings: <section className="settings-card">
+  const setSoundEnabled=(value:boolean)=>{setEnabled(value);try {localStorage.setItem('jorik-sound',value?'on':'off');}catch{}};
+  return { play, enabled, setEnabled:setSoundEnabled, status, settings: <section className="settings-card">
     <h2>Звук новых сообщений</h2>
     <label><input type="checkbox" checked={enabled} onChange={e => {
       const value = e.target.checked; setEnabled(value);
