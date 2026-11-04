@@ -1,0 +1,57 @@
+name: Checks and Synology deploy
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jorik-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+      - run: git diff --check
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: verify
+    runs-on: ubuntu-24.04-arm
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build native Linux ARM64 release
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          printf '{"revision":"%s"}\n' "$REVISION" > public/build-info.json
+          docker build --label "org.opencontainers.image.revision=$REVISION" -t "jorik:git-$REVISION" .
+          docker save "jorik:git-$REVISION" | gzip -1 > "$RUNNER_TEMP/release.tar.gz"
+      - name: Deploy only Jorik over restricted SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.JORIK_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.JORIK_KNOWN_HOSTS }}
+          REVISION: ${{ github.sha }}
+        run: |
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/jorik_ci
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          trap 'rm -f ~/.ssh/jorik_ci' EXIT
+          ssh -i ~/.ssh/jorik_ci -p 2222 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=20 jorikxan@jorikxan.synology.me "release $REVISION" < "$RUNNER_TEMP/release.tar.gz"
