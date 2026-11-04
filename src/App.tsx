@@ -1,3 +1,4 @@
+import LogoutDialog from "./LogoutDialog";
 import StoreBadge from "./StoreBadge";
 import Orders, { type OrderContext } from "./Orders";
 import { useNotificationSound } from "./NotificationSound";
@@ -66,6 +67,7 @@ export default function App() {
   const { slots, hydrate, dark, toggleTheme, fontSize, setFontSize } =
     useOperator();
   const [orderContext, setOrderContext] = useState<OrderContext | undefined>();
+  const [logoutOpen, setLogoutOpen] = useState(false);
   const [orderRequest, setOrderRequest] = useState(0);
   const [orderPanelOpen, setOrderPanelOpen] = useState(false);
   const [replyTargets, setReplyTargets] = useState<
@@ -367,6 +369,7 @@ export default function App() {
     cacheMode.current = null;
     setSelected(null);
     setMessages([]);
+    setLogoutOpen(false);
     setAuth(false);
   }
   function flushDrafts() {
@@ -729,7 +732,7 @@ export default function App() {
               className="rail-button logout-button"
               aria-label="Выйти"
               title="Выйти"
-              onClick={() => void action(logout)}
+              onClick={() => setLogoutOpen(true)}
             >
               <LogOut size={20} />
             </button>
@@ -1497,7 +1500,7 @@ export default function App() {
               <section className="settings-card appearance-settings">
                 <h2>Оформление</h2><p>Светлая и тёмная тема сохраняются на этом устройстве.</p>
                 <button type="button" className="secondary" onClick={toggleTheme}>{dark ? <Sun size={16}/> : <Moon size={16}/>} {dark ? "Светлая тема" : "Тёмная тема"}</button>
-                {!localAccess && <button type="button" className="secondary" onClick={() => void action(logout)}><LogOut size={16}/> Выйти из Jorik</button>}
+                {!localAccess && <button type="button" className="secondary" onClick={() => setLogoutOpen(true)}><LogOut size={16}/> Выйти из Jorik</button>}
               </section>
               <section className="settings-card">
                 <h2>Хранение и безопасность</h2>
@@ -1525,6 +1528,7 @@ export default function App() {
           </div>
         )}
       </main>
+      {logoutOpen && <LogoutDialog onCancel={() => setLogoutOpen(false)} onConfirm={logout}/>}
     </div>
   );
 }

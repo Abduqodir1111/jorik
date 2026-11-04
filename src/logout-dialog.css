@@ -1,0 +1,106 @@
+.logout-dialog {
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  width: min(400px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 24px 90px #0f172a35;
+}
+.logout-dialog::backdrop {
+  background: #0f172a70;
+  backdrop-filter: blur(4px);
+}
+.logout-card {
+  position: relative;
+  padding: 28px;
+}
+.logout-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  padding: 7px;
+  border-radius: 9px;
+  color: var(--muted);
+}
+.logout-close:hover {
+  background: var(--hover);
+}
+.logout-symbol {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 17px;
+  color: #2563eb;
+  background: #dbeafe;
+  margin-bottom: 18px;
+}
+.logout-card h2 {
+  font-size: 22px;
+  letter-spacing: -0.5px;
+  margin: 0 0 10px;
+}
+.logout-card p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+  margin: 0;
+}
+.logout-note {
+  margin-top: 16px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.logout-card footer {
+  display: flex;
+  gap: 10px;
+  margin-top: 24px;
+}
+.logout-card footer button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 44px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.logout-stay {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+.logout-confirm {
+  background: #2563eb;
+  color: white;
+}
+.logout-confirm:hover {
+  background: #1d4ed8;
+}
+.logout-card button:focus-visible {
+  outline: 3px solid #93c5fd;
+  outline-offset: 3px;
+}
+.logout-card button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.logout-card .logout-error {
+  margin-top: 12px;
+  color: #dc2626;
+}
+.dark .logout-symbol {
+  background: #1e3a8a55;
+  color: #93c5fd;
+}
