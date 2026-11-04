@@ -21,7 +21,7 @@ const schema = z
     district: z.string().max(50),
     address: z.string().trim().max(2000),
     coordinates: z.string().trim().max(2000),
-    amount: z.number().finite().nonnegative().max(1e12),
+    amount: z.number().finite().positive().max(1e12),
     isPaid: z.boolean(),
     items: z.string().trim().min(1).max(10000),
   })

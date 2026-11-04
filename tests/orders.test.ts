@@ -40,6 +40,7 @@ test("Orders: validation, immutable chat source, update by ID, phone history, re
       { district: "Другой район" },
       { items: " " },
       { amount: -1 },
+      { amount: 0 },
       { date: "2026-02-30" },
       { source: "Неизвестный" },
     ])

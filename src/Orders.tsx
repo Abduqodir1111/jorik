@@ -1,10 +1,10 @@
+import CompactOrderForm from "./CompactOrderForm";
+import { customerOrderHistory } from "../shared/order-form";
 import StoreBadge from "./StoreBadge";
 import { coalesceAsync } from "./refresh-queue";
 import { useEffect, useRef, useState } from "react";
 import { Plus, Pencil, Trash2, Ban, X, Download, Package } from "lucide-react";
 import {
-  districts,
-  manualSources,
   localDate,
   courierRows,
   type Order,
@@ -70,8 +70,12 @@ export default function Orders({
   openRequest,
   onCloseRequest,
   onPanelChange,
+  accounts,
+  conversations,
 }: {
   visible: boolean;
+  accounts: Account[];
+  conversations: Conversation[];
   context?: OrderContext;
   openRequest: number;
   onCloseRequest: () => void;
@@ -80,6 +84,9 @@ export default function Orders({
   const [orders, setOrders] = useState<Order[]>([]),
     [form, setForm] = useState<OrderInput | null>(null),
     [editing, setEditing] = useState<Order | null>(null);
+  const [formContext, setFormContext] = useState<OrderContext | undefined>();
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
+  const autoPhone = useRef(false);
   const [amount, setAmount] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -89,6 +96,7 @@ export default function Orders({
   async function load() {
     try {
       setOrders(await request<Order[]>(""));
+      setOrdersLoaded(true);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -109,6 +117,17 @@ export default function Orders({
   }, [visible, !!form]);
   function open(order?: Order, ctx?: OrderContext) {
     if (form) return;
+    autoPhone.current = false;
+    const linked = order?.conversationId
+      ? conversations.find((c) => c.id === order.conversationId)
+      : undefined;
+    const account = linked
+      ? accounts.find((a) => a.id === linked.accountId)
+      : undefined;
+    setFormContext(
+      ctx ??
+        (linked && account ? { conversation: linked, account } : undefined),
+    );
     setEditing(order ?? null);
     setForm(order ? { ...order } : blank(ctx));
     setAmount(order ? String(order.amount) : "");
@@ -133,13 +152,25 @@ export default function Orders({
     setHistory(false);
     onCloseRequest();
   }
-  function change<K extends keyof OrderInput>(key: K, value: OrderInput[K]) {
-    setForm((f) => (f ? { ...f, [key]: value } : f));
-  }
-  const phoneHistory =
-    form && /^\+998\d{9}$/.test(form.phone)
-      ? orders.filter((o) => o.phone === form.phone && o.id !== editing?.id)
-      : [];
+  useEffect(() => {
+    if (!form?.conversationId || editing || !ordersLoaded || autoPhone.current)
+      return;
+    autoPhone.current = true;
+    const previous = orders.find(
+      (o) => !o.refused && o.conversationId === form.conversationId,
+    );
+    if (previous)
+      setForm((f) =>
+        f && f.conversationId === previous.conversationId && f.phone === "+998"
+          ? { ...f, phone: previous.phone }
+          : f,
+      );
+  }, [form?.conversationId, editing, ordersLoaded, orders]);
+  const phoneHistory = customerOrderHistory(
+    orders,
+    form?.phone ?? "",
+    editing?.id,
+  );
   const valid =
     !!form &&
     !!form.client.trim() &&
@@ -147,7 +178,8 @@ export default function Orders({
     !!form.date &&
     amount !== "" &&
     Number.isFinite(Number(amount)) &&
-    Number(amount) >= 0 &&
+    Number(amount) > 0 &&
+    Number(amount) <= 1e12 &&
     !!form.items.trim() &&
     (form.deliveryType === "pickup" || !!form.district);
   async function save() {
@@ -298,12 +330,17 @@ export default function Orders({
                         >
                           <td>
                             <strong>{o.client}</strong>
-                            <StoreBadge name={o.source}/>
+                            <StoreBadge name={o.source} />
                             {o.refused && (
                               <span className="order-tag refused">Отказ</span>
                             )}
                           </td>
-                          <td className="order-phone-text">{o.phone.replace(/^\+998(\d{2})(\d{3})(\d{2})(\d{2})$/, "+998 ($1) $2-$3-$4")}</td>
+                          <td className="order-phone-text">
+                            {o.phone.replace(
+                              /^\+998(\d{2})(\d{3})(\d{2})(\d{2})$/,
+                              "+998 ($1) $2-$3-$4",
+                            )}
+                          </td>
                           <td>
                             {o.deliveryType === "pickup" ? (
                               <span className="order-tag pickup">
@@ -365,211 +402,28 @@ export default function Orders({
         </section>
       )}
       {form && (
-        <aside className="order-drawer" aria-label="Оформление заказа">
-          {form && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void save();
-              }}
-            >
-              <header>
-                <div>
-                  <span className="eyebrow">
-                    {editing
-                      ? "РЕДАКТИРОВАНИЕ"
-                      : form.conversationId
-                        ? "ИЗ ДИАЛОГА"
-                        : "РУЧНОЙ ПРИЁМ"}
-                  </span>
-                  <h2>{editing ? "Редактировать заказ" : "Новый заказ"}</h2>
-                </div>
-                <button
-                  type="button"
-                  className="icon"
-                  aria-label="Закрыть заказ"
-                  disabled={busy}
-                  onClick={close}
-                >
-                  <X size={21} />
-                </button>
-              </header>
-              {error && (
-                <p role="alert" className="orders-error">
-                  {error}
-                </p>
-              )}
-              <label>
-                Дата
-                <input
-                  type="date"
-                  required
-                  value={form.date}
-                  onChange={(e) => change("date", e.target.value)}
-                />
-              </label>
-              <div className="order-fields">
-                <label>
-                  Клиент
-                  <input
-                    required
-                    readOnly={!!form.conversationId}
-                    maxLength={160}
-                    value={form.client}
-                    onChange={(e) => change("client", e.target.value)}
-                    placeholder="Имя клиента"
-                  />
-                </label>
-                <label>
-                  Источник
-                  {form.conversationId ? (
-                    <input readOnly value={form.source} />
-                  ) : (
-                    <select
-                      value={form.source}
-                      onChange={(e) => change("source", e.target.value)}
-                    >
-                      {manualSources.map((s) => (
-                        <option key={s}>{s}</option>
-                      ))}
-                    </select>
-                  )}
-                </label>
-              </div>
-              <label>
-                Телефон <span className="required">*</span>
-                <div
-                  className={
-                    "order-phone " +
-                    (!/^\+998\d{9}$/.test(form.phone) ? "invalid" : "")
-                  }
-                >
-                  <span>+998</span>
-                  <input
-                    aria-label="Телефон — 9 цифр"
-                    inputMode="numeric"
-                    autoComplete="tel-national"
-                    placeholder="90 123 45 67"
-                    value={form.phone.slice(4)}
-                    onChange={(e) => {
-                      let n = e.target.value.replace(/\D/g, "");
-                      if (n.length === 12 && n.startsWith("998"))
-                        n = n.slice(3);
-                      change("phone", "+998" + n.slice(0, 9));
-                    }}
-                  />
-                </div>
-              </label>
-              {!/^\+998\d{9}$/.test(form.phone) && (
-                <small className="orders-error">
-                  Введите ровно 9 цифр после +998
-                </small>
-              )}
-              {!!phoneHistory.length && (
-                <button
-                  type="button"
-                  className="history-button"
-                  onClick={() => setHistory(true)}
-                >
-                  Показать историю · {phoneHistory.length}
-                </button>
-              )}
-              <fieldset>
-                <legend>Тип получения</legend>
-                <div className="delivery-options">
-                  {(["delivery", "pickup"] as const).map((t) => (
-                    <label key={t}>
-                      <input
-                        type="radio"
-                        name="deliveryType"
-                        checked={form.deliveryType === t}
-                        onChange={() => change("deliveryType", t)}
-                      />
-                      {t === "delivery" ? "Доставка" : "Самовывоз"}
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-              {form.deliveryType === "delivery" && (
-                <>
-                  <label>
-                    Район <span className="required">*</span>
-                    <select
-                      required
-                      value={form.district}
-                      onChange={(e) => change("district", e.target.value)}
-                    >
-                      <option value="">Выберите район</option>
-                      {districts.map((d) => (
-                        <option key={d}>{d}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Адрес
-                    <input
-                      maxLength={2000}
-                      value={form.address}
-                      onChange={(e) => change("address", e.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Координаты / ссылка на геолокацию
-                    <input
-                      maxLength={2000}
-                      value={form.coordinates}
-                      onChange={(e) => change("coordinates", e.target.value)}
-                    />
-                  </label>
-                </>
-              )}
-              <div className="order-fields">
-                <label>
-                  Сумма заказа, сум <span className="required">*</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="1000000000000"
-                    step="0.01"
-                    required
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                  />
-                </label>
-                <label className="order-payment">
-                  <input
-                    type="checkbox"
-                    checked={form.isPaid}
-                    onChange={(e) => change("isPaid", e.target.checked)}
-                  />
-                  Оплачено
-                </label>
-              </div>
-              <label>
-                Заказ <span className="required">*</span>
-                <textarea
-                  required
-                  maxLength={10000}
-                  rows={5}
-                  value={form.items}
-                  onChange={(e) => change("items", e.target.value)}
-                  placeholder="Книги, переплёт, количество…"
-                />
-              </label>
-              <footer>
-                <button type="button" disabled={busy} onClick={close}>
-                  Отмена
-                </button>
-                <button className="primary" disabled={!valid || busy}>
-                  {busy
-                    ? "Сохраняем…"
-                    : editing
-                      ? "Обновить заказ"
-                      : "Сохранить заказ"}
-                </button>
-              </footer>
-            </form>
-          )}
+        <aside
+          className={
+            "order-drawer compact-order-drawer " +
+            (form.deliveryType === "pickup" ? "is-pickup" : "is-delivery")
+          }
+          aria-label="Оформление заказа"
+        >
+          <CompactOrderForm
+            value={form}
+            context={formContext}
+            amount={amount}
+            onAmount={setAmount}
+            onChange={(patch) => setForm((f) => (f ? { ...f, ...patch } : f))}
+            history={phoneHistory}
+            onHistory={() => setHistory(true)}
+            editing={!!editing}
+            busy={busy}
+            valid={valid}
+            error={error}
+            onSave={() => void save()}
+            onCancel={close}
+          />
         </aside>
       )}
       <dialog

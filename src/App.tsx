@@ -1437,6 +1437,8 @@ export default function App() {
           </div>
         </section>}
         <Orders
+          accounts={accounts}
+          conversations={conversations}
           visible={page === "orders"}
           context={orderContext}
           openRequest={orderRequest}
