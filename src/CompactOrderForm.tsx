@@ -342,7 +342,13 @@ export default function CompactOrderForm({
           aria-pressed={f.isPaid}
           onClick={() => onChange({ isPaid: !f.isPaid })}
         >
-          <Check size={14} />
+          {f.isPaid && (
+            <Check
+              size={14}
+              className="payment-check-icon"
+              strokeWidth={2.75}
+            />
+          )}
           Оплачено
         </button>
       </div>
