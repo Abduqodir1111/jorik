@@ -51,6 +51,7 @@ export interface Attachment {
 }
 export interface Message {
   replyToId?: string | null;
+  reply_to?: { sender_name: string; text: string; message_id?: string };
   readAt?: string | null;
   id: string;
   conversationId: string;

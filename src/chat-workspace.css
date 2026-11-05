@@ -76,3 +76,9 @@
   color: inherit;
   text-decoration: underline;
 }
+.message-quote { min-width: 0; max-width: 100%; font-size: inherit; opacity: 1; margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid #3979ef; background: rgba(57,121,239,.08); border-radius: 0 6px 6px 0; }
+.message-quote strong, .message-quote span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.message-quote strong { color: #245dc0; font-size: .85em; }
+.message-quote span { font-size: .9em; opacity: .85; }
+.message-row.out .message-quote { border-left-color: #c4dcff; background: rgba(255,255,255,.13); }
+.message-row.out .message-quote strong { color: #e5efff; }

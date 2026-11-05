@@ -53,9 +53,25 @@ export default memo(function MessageTimeline({
                 (m.status === "error" || m.status === "unknown" ? "failed" : "")
               }
             >
-              {m.replyToId && (
-                <blockquote className="message-quote">
-                  {messagesById.get(m.replyToId)?.text || "Ответ на сообщение"}
+              {(m.reply_to || m.replyToId) && (
+                <blockquote
+                  className="message-quote"
+                  aria-label="Цитата сообщения"
+                >
+                  <strong>
+                    {m.reply_to?.sender_name || "Ответ на сообщение"}
+                  </strong>
+                  <span
+                    title={
+                      m.reply_to?.text ||
+                      (m.replyToId && messagesById.get(m.replyToId)?.text) ||
+                      "Исходное сообщение недоступно"
+                    }
+                  >
+                    {m.reply_to?.text ||
+                      (m.replyToId && messagesById.get(m.replyToId)?.text) ||
+                      "Исходное сообщение недоступно"}
+                  </span>
                 </blockquote>
               )}
               {platform === "instagram" &&

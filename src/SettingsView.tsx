@@ -1,10 +1,13 @@
-import { useState } from "react";
-import { Check, LogOut, Volume2, Sun, Moon, Save, Server } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Check, LogOut, Volume2, Sun, Moon, Save, Server, Users, ChevronDown } from "lucide-react";
 import { useOperator } from "./OperatorContext";
 import type { Mode } from "../shared/types";
 import "./settings-view.css";
 
 type Props = {
+  accountsContent: ReactNode;
+  accountsExpanded: boolean;
+  onToggleAccounts: () => void;
   ownerName: string;
   online: boolean;
   mode: Mode;
@@ -18,6 +21,9 @@ type Props = {
   onLogout?: () => void;
 };
 export default function SettingsView({
+  accountsContent,
+  accountsExpanded,
+  onToggleAccounts,
   ownerName,
   online,
   mode,
@@ -82,6 +88,21 @@ export default function SettingsView({
           </div>
           {saveButton("Сохранить изменения")}
         </header>
+        <section className="settings-card accounts-settings-card">
+          <button
+            type="button"
+            className="settings-accounts-toggle"
+            aria-expanded={accountsExpanded}
+            aria-controls="settings-account-connections"
+            onClick={onToggleAccounts}
+          >
+            <Users size={20} aria-hidden="true" />
+            <span>Аккаунты и подключения</span>
+            <ChevronDown size={18} aria-hidden="true" style={{transform:accountsExpanded ? "rotate(180deg)" : undefined}} />
+          </button>
+          <p>Управление подключениями Telegram и Instagram. Ответ отправляется через аккаунт, в который написал клиент.</p>
+          {accountsExpanded && <div id="settings-account-connections">{accountsContent}</div>}
+        </section>
         <section className="settings-card preferences-card">
           <header>
             <h2>Внешний вид и уведомления</h2>
@@ -266,20 +287,8 @@ export default function SettingsView({
                 {mode === "demo" ? " Демонстрационный режим." : ""}
               </p>
             </div>
-            {onLogout && (
-              <button
-                type="button"
-                className="settings-logout"
-                onClick={onLogout}
-              >
-                <LogOut size={15} />
-                Выйти из Jorik
-              </button>
-            )}
+
           </div>
-          <small>
-            Приём сообщений продолжается на сервере после выхода из аккаунта.
-          </small>
         </section>
         <footer className="settings-footer">
           <p role="status">
@@ -292,6 +301,14 @@ export default function SettingsView({
           </p>
           {saveButton("Сохранить все настройки")}
         </footer>
+        {onLogout && <section className="settings-card settings-session-card" aria-label="Выход из аккаунта">
+          <p>Приём сообщений продолжится на сервере после выхода.</p>
+          <button type="button" className="settings-logout" onClick={onLogout}>
+            <LogOut size={16} aria-hidden="true" />
+            Выйти из системы
+          </button>
+        </section>}
+
       </div>
     </div>
   );

@@ -10,7 +10,6 @@
 .rail-button { width:44px; height:44px; border-radius:12px; }
 .sidebar > .rail-button[aria-label="Входящие"] { order:1; }
 .sidebar > .rail-button[aria-label="Заказы"] { order:2; }
-.sidebar > .rail-button[aria-label="Аккаунты"] { order:3; }
 .rail-bottom { order:4; }
 .app .topbar { height:44px; min-height:44px; padding:0 24px; background:var(--surface); border-bottom:1px solid var(--line); font-size:12px; }
 .app.inbox-page .topbar { display:none; }
@@ -167,12 +166,12 @@
   .app .sidebar { position:relative; width:100%; min-width:0; height:var(--mobile-nav-height); min-height:var(--mobile-nav-height); padding:5px 4px calc(5px + env(safe-area-inset-bottom)); display:flex; flex-direction:row; gap:0; justify-content:space-around; border-right:0; border-top:1px solid #1e293b; overflow:visible; }
   .sidebar .rail-logo,.sidebar .logout-button { display:none; }
   .sidebar .rail-bottom { display:contents; }
-  .sidebar .rail-button { display:flex; flex-direction:column; gap:4px; width:20%; min-width:0; height:49px; border-radius:9px; padding:5px 2px; background:none; box-shadow:none; }
+  .sidebar .rail-button { display:flex; flex-direction:column; gap:4px; width:25%; min-width:0; height:49px; border-radius:9px; padding:5px 2px; background:none; box-shadow:none; }
   .rail-label { display:block; font-size:9px; line-height:1; }
   .sidebar .rail-button svg { width:20px; height:20px; }
   .sidebar .rail-button.active { color:#60a5fa; }
-  .sidebar .rail-bottom > button[aria-label="Настройки"] { order:4; }
-  .sidebar .rail-bottom > button[aria-label="Тёмная тема"],.sidebar .rail-bottom > button[aria-label="Светлая тема"] { order:5; }
+  .sidebar .rail-bottom > button[aria-label="Настройки"] { order:5; }
+  .sidebar .rail-bottom > button[aria-label="Тёмная тема"],.sidebar .rail-bottom > button[aria-label="Светлая тема"] { order:4; }
   .rail-count { top:0; right:calc(50% - 23px); min-width:14px; height:14px; font-size:8px; }
   .app > main { flex:1; width:100%; height:calc(100dvh - var(--mobile-nav-height)); }
   .app .topbar { height:36px; min-height:36px; padding:0 14px; }

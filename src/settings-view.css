@@ -266,10 +266,17 @@
   font-size: 12px;
   white-space: nowrap;
 }
-.settings-logout:hover {
-  color: #e11d48;
+.settings-logout {
+  min-height: 44px;
+  color: #be123c;
   border-color: #fda4af;
+  background: #fff1f2;
+  font-weight: 600;
 }
+.settings-logout:hover { background: #ffe4e6; border-color: #fb7185; }
+.settings-logout:focus-visible { outline: 2px solid #e11d48; outline-offset: 3px; }
+.dark .settings-logout { color: #fda4af; background: #4c0519; border-color: #9f1239; }
+.dark .settings-logout:hover { background: #881337; }
 .settings-footer {
   display: flex;
   align-items: center;
@@ -326,3 +333,17 @@
   }
 }
 .redesigned-settings .settings-card { width:100%; max-width:none; }
+.settings-accounts-toggle { display:flex; align-items:center; gap:10px; width:100%; padding:0; color:var(--ink); background:none; border:0; text-align:left; font-size:16px; font-weight:700; }
+.settings-accounts-toggle > span { flex:1; }
+.settings-accounts-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:6px; border-radius:4px; }
+#settings-account-connections { margin-top:20px; min-width:0; }
+#settings-account-connections .account-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+#settings-account-connections .account-card { min-width:0; }
+.settings-session-card { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.settings-session-card p { margin:0; }
+@media(max-width:600px) {
+  #settings-account-connections .account-grid { grid-template-columns:1fr; }
+  .settings-session-card { align-items:stretch; flex-direction:column; }
+  .settings-session-card .settings-logout { width:100%; font-size:14px; }
+  .settings-accounts-toggle { min-height:44px; }
+}

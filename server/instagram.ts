@@ -28,6 +28,7 @@ type IGMessage = {
   from: Person;
   message?: string;
   attachments?: { data: InstagramMedia[] };
+  reply_to?: { mid: string };
 };
 type Thread = {
   id: string;
@@ -312,6 +313,9 @@ export class InstagramIntegration {
         db.prepare(
           "UPDATE OR IGNORE messages SET instagram_key=? WHERE id=?",
         ).run(key, saved.id);
+        if (typeof m.reply_to?.mid === "string" && m.reply_to.mid && m.reply_to.mid !== m.id) {
+          db.prepare("UPDATE messages SET reply_to_external_id=? WHERE id=?").run(m.reply_to.mid, saved.id);
+        }
         const media = instagramAttachments(m.attachments?.data, saved.id);
         if (m.attachments) {
           db.prepare("UPDATE messages SET attachments=?,text=? WHERE id=?").run(
@@ -635,6 +639,7 @@ export class InstagramIntegration {
                 from: { id: out ? identity.ig_id : peer },
                 message:
                   typeof message.text === "string" ? message.text : undefined,
+                reply_to: typeof message.reply_to?.mid === "string" ? {mid:message.reply_to.mid} : undefined,
                 attachments: Array.isArray(message.attachments)
                   ? {
                       data: message.attachments.map((a: any) =>

@@ -28,10 +28,8 @@ import {
   Send,
   Search,
   Settings,
-  Users,
   ArrowLeft,
   Info,
-  LogOut,
   Plus,
   Reply,
   Moon,
@@ -95,6 +93,7 @@ export default function App() {
   const [showPassword, setShowPassword] = useState(false);
   const [showAllChats, setShowAllChats] = useState(false);
   const [rememberLogin, setRememberLogin] = useState(true);
+  const [accountsExpanded, setAccountsExpanded] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]),
     [conversations, setConversations] = useState<Conversation[]>([]),
     [messages, setMessages] = useState<Message[]>([]),
@@ -696,15 +695,6 @@ export default function App() {
           )}
         </button>
         <button
-          className={"rail-button " + (page === "accounts" ? "active" : "")}
-          aria-label="Аккаунты"
-          aria-current={page === "accounts" ? "page" : undefined}
-          title="Аккаунты"
-          onClick={() => setPage("accounts")}
-        >
-          <Users size={22} /><span className="rail-label">Каналы</span>
-        </button>
-        <button
           className={"rail-button " + (page === "orders" ? "active" : "")}
           aria-label="Заказы"
           aria-current={page === "orders" ? "page" : undefined}
@@ -715,32 +705,23 @@ export default function App() {
         </button>
         <div className="rail-bottom">
           <button
-            className={"rail-button " + (page === "settings" ? "active" : "")}
-            aria-label="Настройки"
-          aria-current={page === "settings" ? "page" : undefined}
-            title="Настройки"
-            onClick={() => setPage("settings")}
-          >
-            <Settings size={22} /><span className="rail-label">Настройки</span>
-          </button>
-          <button
             className="rail-button"
             aria-label={dark ? "Светлая тема" : "Тёмная тема"}
             title={dark ? "Светлая тема" : "Тёмная тема"}
             onClick={toggleTheme}
           >
-            {dark ? <Sun size={22} /> : <Moon size={22} />}<span className="rail-label">{dark ? "День" : "Ночь"}</span>
+            {dark ? <Sun size={22} /> : <Moon size={22} />}
+            <span className="rail-label">{dark ? "День" : "Ночь"}</span>
           </button>
-          {!localAccess && (
-            <button
-              className="rail-button logout-button"
-              aria-label="Выйти"
-              title="Выйти"
-              onClick={() => setLogoutOpen(true)}
-            >
-              <LogOut size={20} />
-            </button>
-          )}
+          <button
+            className={"rail-button " + (page === "settings" ? "active" : "")}
+            aria-label="Настройки"
+            aria-current={page === "settings" ? "page" : undefined}
+            title="Настройки"
+            onClick={() => setPage("settings")}
+          >
+            <Settings size={22} /><span className="rail-label">Настройки</span>
+          </button>
         </div>
       </aside>
       <main>
@@ -753,9 +734,7 @@ export default function App() {
                 ? "Входящие"
                 : page === "orders"
                   ? "Заказы"
-                  : page === "accounts"
-                    ? "Аккаунты"
-                    : "Настройки"}
+                  : "Настройки"}
             </b>
           </div>
           <span className={mode === "demo" ? "demo-label" : "real-label"}>
@@ -803,40 +782,6 @@ export default function App() {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
               />
-              <button
-                role="switch"
-                aria-checked={unread}
-                aria-label="Только непрочитанные"
-                title="Только непрочитанные"
-                className={"unread-switch " + (unread ? "on" : "")}
-                onClick={() => setUnread((x) => !x)}
-              >
-                <span />
-              </button>
-            </div>
-            <div className="source-filter">
-              <select
-                aria-label="Источник сообщений"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-              >
-                <option value="all">Все источники</option>
-                <option value="telegram">Telegram</option>
-                <option value="instagram">Instagram</option>
-                <option value="uzum" disabled>
-                  Uzum · не подключён
-                </option>
-                <optgroup label="Аккаунты">
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
-              <span>
-                {unread ? "Непрочитанные" : filtered.length + " диалогов"}
-              </span>
             </div>
             <button
               className="conversation-limit"
@@ -870,7 +815,7 @@ export default function App() {
                       ? "Попробуйте другой поисковый запрос"
                       : mode === "demo"
                         ? "Добавьте примеры командой npm run seed"
-                        : "Для загрузки переписки войдите в Telegram в разделе «Аккаунты»."}
+                        : "Для загрузки переписки откройте «Настройки» → «Аккаунты и подключения» и войдите в Telegram."}
                   </p>
                 </div>
               )}
@@ -1241,7 +1186,7 @@ export default function App() {
                     <button
                       className="primary"
                       style={{ marginTop: 20 }}
-                      onClick={() => setPage("accounts")}
+                      onClick={() => { setAccountsExpanded(true); setPage("settings"); }}
                     >
                       Подключить Telegram 1
                     </button>
@@ -1298,15 +1243,17 @@ export default function App() {
             </aside>
           )}
         </div>
-        {page === "accounts" && <section className="accounts-page">
-          <div className="page-content">
-            <>
-              <span className="eyebrow">КАНАЛЫ ОБЩЕНИЯ</span>
-              <h1>Ваши аккаунты</h1>
-              <p className="page-description">
-                Каждый ответ отправляется через тот аккаунт, в который написал
-                клиент.
-              </p>
+        <Orders
+          accounts={accounts}
+          conversations={conversations}
+          visible={page === "orders"}
+          context={orderContext}
+          openRequest={orderRequest}
+          closeRequest={orderCloseRequest}
+          onCloseRequest={() => setOrderContext(undefined)}
+          onPanelChange={setOrderPanelOpen}
+        />
+        {page === "settings" && <SettingsView accountsExpanded={accountsExpanded} onToggleAccounts={() => setAccountsExpanded(value => !value)} accountsContent={<>
               <div className="account-grid">
                 {accounts.map((a) => (
                   <article className="account-card" key={a.id}>
@@ -1362,7 +1309,7 @@ export default function App() {
                     {mode === "real" && a.platform === "telegram" && (
                       <TelegramConnect
                         accountId={a.id}
-                        active={page === "accounts"}
+                        active={page === "settings" && accountsExpanded}
                         onChange={() => void refresh().catch(report)}
                       />
                     )}
@@ -1438,20 +1385,7 @@ export default function App() {
                     : "Подключите каждый Telegram-аккаунт отдельно. Диалоги и ответы привязаны к выбранному аккаунту. Instagram принимает сообщения через вебхуки Meta."}
                 </p>
               </div>
-            </>
-          </div>
-        </section>}
-        <Orders
-          accounts={accounts}
-          conversations={conversations}
-          visible={page === "orders"}
-          context={orderContext}
-          openRequest={orderRequest}
-          closeRequest={orderCloseRequest}
-          onCloseRequest={() => setOrderContext(undefined)}
-          onPanelChange={setOrderPanelOpen}
-        />
-        {page === "settings" && <SettingsView ownerName={ownerName} online={online} mode={mode} sound={notificationSound} onSaveOwner={async name=>{await api("/settings","PUT",{ownerName:name});setOwnerName(name);}} onLogout={localAccess?undefined:()=>setLogoutOpen(true)}/>}
+</>} ownerName={ownerName} online={online} mode={mode} sound={notificationSound} onSaveOwner={async name=>{await api("/settings","PUT",{ownerName:name});setOwnerName(name);}} onLogout={localAccess?undefined:()=>setLogoutOpen(true)}/>}
       </main>
       {logoutOpen && <LogoutDialog onCancel={() => setLogoutOpen(false)} onConfirm={logout}/>}
     </div>

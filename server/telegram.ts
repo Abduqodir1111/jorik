@@ -568,6 +568,77 @@ export class TelegramIntegration {
           saved.id,
         );
     }
+    if (m.replyTo instanceof Api.MessageReplyHeader) {
+      const header = m.replyTo;
+      const samePeer =
+        !header.replyToPeerId ||
+        (header.replyToPeerId instanceof Api.PeerUser &&
+          header.replyToPeerId.userId.toString() === id);
+      const external =
+        samePeer && header.replyToMsgId && header.replyToMsgId !== m.id
+          ? String(header.replyToMsgId)
+          : null;
+      const row = this.store.db
+        .prepare(
+          "SELECT id,reply_to_snapshot FROM messages WHERE conversation_id=? AND external_id=?",
+        )
+        .get(c.id, String(m.id)) as {
+        id: string;
+        reply_to_snapshot: string | null;
+      };
+      let snapshot: Message["reply_to"];
+      if (header.quoteText)
+        snapshot = {
+          sender_name: header.replyFrom?.fromName || "Сообщение",
+          text: header.quoteText.slice(0, 4096),
+          message_id: external || undefined,
+        };
+      if (
+        external &&
+        !row.reply_to_snapshot &&
+        !this.store.db
+          .prepare(
+            "SELECT 1 FROM messages WHERE conversation_id=? AND external_id=?",
+          )
+          .get(c.id, external)
+      ) {
+        try {
+          const original = (
+            await this.client!.getMessages(this.peer(id), {
+              ids: [Number(external)],
+            })
+          )[0];
+          if (
+            original instanceof Api.Message &&
+            original.peerId instanceof Api.PeerUser &&
+            original.peerId.userId.toString() === id
+          ) {
+            const text =
+              header.quoteText ||
+              original.message ||
+              photoInfo(original)?.name ||
+              videoInfo(original)?.name ||
+              documentInfo(original)?.name ||
+              "Вложение";
+            snapshot = {
+              sender_name: original.out
+                ? this.store.account(this.accountId).name
+                : this.store.conversation(c.id).name,
+              text: text.slice(0, 4096),
+              message_id: external,
+            };
+          }
+        } catch {
+          /* Keep the reply even if the original is unavailable. */
+        }
+      }
+      if (external || snapshot)
+        this.store.db
+          .prepare(
+            "UPDATE messages SET reply_to_external_id=COALESCE(?,reply_to_external_id),reply_to_snapshot=COALESCE(?,reply_to_snapshot) WHERE id=?",
+          )
+          .run(external, snapshot ? JSON.stringify(snapshot) : null, row.id);
+    }
     this.changed();
   }
   private photos = new Map<string, Promise<{ bytes: Buffer; mime: string }>>();

@@ -1,4 +1,7 @@
-import { reconcileInstagramMessage } from "./instagram-message-key.js";
+import {
+  instagramMessageKey,
+  reconcileInstagramMessage,
+} from "./instagram-message-key.js";
 import { randomUUID } from "node:crypto";
 import type { DB } from "./db.js";
 import type { Account, Conversation, Message } from "../shared/types.js";
@@ -29,9 +32,11 @@ export class Store {
     return a;
   }
   conversations(): Conversation[] {
-    return (this.db
-      .prepare(conversationSelect + " ORDER BY c.updated_at DESC")
-      .all() as Conversation[]).map(c => ({ ...c, needsReply: c.unread > 0 }));
+    return (
+      this.db
+        .prepare(conversationSelect + " ORDER BY c.updated_at DESC")
+        .all() as Conversation[]
+    ).map((c) => ({ ...c, needsReply: c.unread > 0 }));
   }
   conversation(id: string) {
     const c = this.db.prepare(conversationSelect + " WHERE c.id=?").get(id) as
@@ -40,14 +45,77 @@ export class Store {
     return { ...c, needsReply: c.unread > 0 };
   }
   messages(id: string): Message[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT id,conversation_id AS conversationId,external_id AS externalId,direction,text,status,created_at AS createdAt,error,attachments,reply_to_id AS replyToId,read_at AS readAt FROM messages WHERE conversation_id=? ORDER BY created_at,rowid",
-        )
-        .all(id) as (Omit<Message, "attachments"> & { attachments: string })[]
-    ).map((m) => ({ ...m, attachments: JSON.parse(m.attachments) }));
+    const rows = this.db
+      .prepare(
+        "SELECT id,conversation_id AS conversationId,external_id AS externalId,direction,text,status,created_at AS createdAt,error,attachments,reply_to_id AS replyToId,read_at AS readAt,reply_to_external_id AS replyExternalId,reply_to_snapshot AS replySnapshot FROM messages WHERE conversation_id=? ORDER BY created_at,rowid",
+      )
+      .all(id) as (Omit<Message, "attachments"> & {
+      attachments: string;
+      replyExternalId: string | null;
+      replySnapshot: string | null;
+    })[];
+    const context = this.db
+      .prepare(
+        "SELECT c.name,c.username,a.name AS account_name,a.platform FROM conversations c JOIN accounts a ON a.id=c.account_id WHERE c.id=?",
+      )
+      .get(id) as
+      | {
+          name: string;
+          username: string;
+          account_name: string;
+          platform: string;
+        }
+      | undefined;
+    const canonical = (mid: string) =>
+      context?.platform === "instagram" ? instagramMessageKey(mid) : mid;
+    const byId = new Map(rows.map((m) => [m.id, m]));
+    const byExternal = new Map(
+      rows
+        .filter((m) => m.externalId)
+        .map((m) => [canonical(m.externalId!), m]),
+    );
+    return rows.map(({ replyExternalId, replySnapshot, ...m }) => {
+      const target =
+        (m.replyToId ? byId.get(m.replyToId) : undefined) ||
+        (replyExternalId
+          ? byExternal.get(canonical(replyExternalId))
+          : undefined);
+      let snapshot: Message["reply_to"];
+      if (replySnapshot) {
+        try {
+          snapshot = JSON.parse(replySnapshot);
+        } catch {
+          /* A damaged snapshot must not break history. */
+        }
+      }
+      const reply = target
+        ? {
+            sender_name:
+              target.direction === "out"
+                ? context?.account_name || "Вы"
+                : context?.username
+                  ? `@${context.username.replace(/^@/, "")}`
+                  : context?.name || "Клиент",
+            text: snapshot?.text || target.text,
+            message_id: target.externalId || undefined,
+          }
+        : snapshot ||
+          (replyExternalId || m.replyToId
+            ? {
+                sender_name: "Сообщение недоступно",
+                text: "Исходное сообщение не загружено или удалено",
+                message_id: replyExternalId || undefined,
+              }
+            : undefined);
+      return {
+        ...m,
+        replyToId: target?.id || m.replyToId,
+        attachments: JSON.parse(m.attachments),
+        ...(reply ? { reply_to: reply } : {}),
+      };
+    });
   }
+
   incoming(accountId: string, event: IncomingEvent) {
     const a = this.account(accountId);
     const e = this.resolveAdapter(a).normalizeIncoming(event);
@@ -211,7 +279,8 @@ export class Store {
         adapter.validateReply(a, m);
         const result = await adapter.send(a, m, job.idempotency_key);
         this.db.transaction(() => {
-          if (a.platform === "instagram") reconcileInstagramMessage(this.db,m.id,c.id,result.externalId);
+          if (a.platform === "instagram")
+            reconcileInstagramMessage(this.db, m.id, c.id, result.externalId);
           // A live Telegram echo may arrive before the RPC response.
           this.db
             .prepare(
