@@ -52,7 +52,7 @@ export async function createApp(opts: {
       !!opts.publicBaseUrl && new URL(opts.publicBaseUrl).protocol === "https:",
   };
   if (!opts.disableRateLimit)
-    await app.register(rateLimit, { max: 240, timeWindow: "1 minute" });
+    await app.register(rateLimit, { max: 2400, timeWindow: "1 minute" });
   const db = openDb(opts.dataDir, opts.mode),
     clients = new Set<ServerResponse>();
   // A process crash after provider submission is ambiguous: never blindly resend.
@@ -154,8 +154,14 @@ export async function createApp(opts: {
       .header("X-Content-Type-Options", "nosniff")
       .header("Referrer-Policy", "same-origin")
       .header("X-Frame-Options", "DENY")
-      .header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
-      .header("Content-Security-Policy-Report-Only", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; font-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
+      .header(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+      )
+      .header(
+        "Content-Security-Policy-Report-Only",
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; font-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+      );
     if (sessionCookie.secure)
       reply.header("Strict-Transport-Security", "max-age=31536000");
     if (!req.url.startsWith("/api/")) return;
@@ -359,6 +365,42 @@ export async function createApp(opts: {
       return reply
         .type(mime)
         .header("Content-Disposition", "inline")
+        .send(bytes);
+    },
+  );
+
+  app.get<{ Params: { id: string }; Querystring: { download?: string } }>(
+    "/api/telegram/documents/:id",
+    async (req, reply) => {
+      const row = db
+        .prepare(
+          "SELECT c.account_id,m.attachments FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=?",
+        )
+        .get(req.params.id) as
+        { account_id: string; attachments: string } | undefined;
+      const attachment =
+        row &&
+        JSON.parse(row.attachments).find(
+          (a: { kind: string }) => a.kind === "file",
+        );
+      if (!row || !attachment)
+        return reply.code(404).send({ error: "Документ не найден" });
+      const { bytes, mime } = await tg(row.account_id).photo(
+        req.params.id,
+        "document",
+      );
+      const filename = encodeURIComponent(attachment.name).replace(
+        /['()*]/g,
+        (c) => "%" + c.charCodeAt(0).toString(16),
+      );
+      return reply
+        .type(mime)
+        .header("X-Content-Type-Options", "nosniff")
+        .header(
+          "Content-Disposition",
+          `${mime === "application/pdf" && req.query.download !== "1" ? "inline" : "attachment"}; filename*=UTF-8''${filename}`,
+        )
+        .header("Cache-Control", "private, max-age=3600")
         .send(bytes);
     },
   );

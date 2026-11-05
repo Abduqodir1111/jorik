@@ -3,6 +3,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {
   photoInfo,
+  documentInfo,
+  documentMime,
+  MAX_DOCUMENT_BYTES,
   imageMime,
   MAX_PHOTO_BYTES,
   videoInfo,
@@ -504,7 +507,8 @@ export class TelegramIntegration {
     if (!c) return;
     const photo = photoInfo(m);
     const video = videoInfo(m);
-    const mediaInfo = photo || video;
+    const document = documentInfo(m);
+    const mediaInfo = photo || video || document;
     const text =
         m.message ||
         mediaInfo?.name ||
@@ -556,9 +560,9 @@ export class TelegramIntegration {
           m.message || mediaInfo.name,
           JSON.stringify([
             {
-              kind: video ? "video" : "image",
+              kind: document ? "file" : video ? "video" : "image",
               ...mediaInfo,
-              url: `/api/telegram/${video ? "videos" : "photos"}/${saved.id}`,
+              url: `/api/telegram/${document ? "documents" : video ? "videos" : "photos"}/${saved.id}`,
             },
           ]),
           saved.id,
@@ -569,7 +573,7 @@ export class TelegramIntegration {
   private photos = new Map<string, Promise<{ bytes: Buffer; mime: string }>>();
   private mediaActive = 0;
   private mediaWaiting: (() => void)[] = [];
-  private async queuedPhoto(messageId: string, video: boolean) {
+  private async queuedPhoto(messageId: string, video: boolean | "document") {
     if (this.mediaActive >= 3)
       await new Promise<void>((resolve) => this.mediaWaiting.push(resolve));
     else this.mediaActive++;
@@ -583,9 +587,11 @@ export class TelegramIntegration {
   }
   async photo(
     messageId: string,
-    video = false,
+    video: boolean | "document" = false,
   ): Promise<{ bytes: Buffer; mime: string }> {
-    const key = (video ? "video:" : "photo:") + messageId;
+    const key =
+      (video === "document" ? "document:" : video ? "video:" : "photo:") +
+      messageId;
     const existing = this.photos.get(key);
     if (existing) return existing;
     const task = this.queuedPhoto(messageId, video);
@@ -596,9 +602,15 @@ export class TelegramIntegration {
       this.photos.delete(key);
     }
   }
-  private async downloadPhoto(messageId: string, video: boolean) {
-    const limit = video ? MAX_VIDEO_BYTES : MAX_PHOTO_BYTES;
-    const mimeOf = video ? videoMime : imageMime;
+  private async downloadPhoto(messageId: string, video: boolean | "document") {
+    const limit =
+      video === "document"
+        ? MAX_DOCUMENT_BYTES
+        : video
+          ? MAX_VIDEO_BYTES
+          : MAX_PHOTO_BYTES;
+    const mimeOf =
+      video === "document" ? documentMime : video ? videoMime : imageMime;
     const row = this.store.db
       .prepare(
         "SELECT m.external_id,c.external_id AS peer_id,m.attachments FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND c.account_id=?",
@@ -608,7 +620,9 @@ export class TelegramIntegration {
     if (
       !row ||
       !JSON.parse(row.attachments).some(
-        (a: { kind: string }) => a.kind === (video ? "video" : "image"),
+        (a: { kind: string }) =>
+          a.kind ===
+          (video === "document" ? "file" : video ? "video" : "image"),
       )
     )
       throw new Error("Фото или видеозапись не найдена в этом аккаунте.");
@@ -620,7 +634,7 @@ export class TelegramIntegration {
         createHash("sha256")
           .update(this.accountId + ":" + messageId)
           .digest("hex") +
-        (video ? ".mp4" : ".img"),
+        (video === "document" ? ".doc" : video ? ".mp4" : ".img"),
     );
     try {
       const bytes = await fs.readFile(file);
@@ -639,7 +653,12 @@ export class TelegramIntegration {
       const message = messages[0];
       if (!(message instanceof Api.Message))
         throw new Error("PHOTO_UNAVAILABLE");
-      const info = video ? videoInfo(message) : photoInfo(message);
+      const info =
+        video === "document"
+          ? documentInfo(message)
+          : video
+            ? videoInfo(message)
+            : photoInfo(message);
       if (!info) throw new Error("PHOTO_UNAVAILABLE");
       if (info.size > limit) throw new Error("PHOTO_TOO_LARGE");
       const bytes = await this.client.downloadMedia(message, {

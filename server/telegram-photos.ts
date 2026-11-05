@@ -81,3 +81,53 @@ export function videoMime(bytes: Buffer) {
     return "video/mp4";
   throw new Error("Telegram вернул неподдерживаемый формат видео.");
 }
+
+export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
+export function documentInfo(
+  m: Api.Message,
+): Pick<Attachment, "mime" | "name" | "size"> | undefined {
+  const media = m.media;
+  if (
+    !(media instanceof Api.MessageMediaDocument) ||
+    media.ttlSeconds ||
+    !(media.document instanceof Api.Document)
+  )
+    return;
+  const doc = media.document;
+  const attribute = doc.attributes.find(
+    (a) => a instanceof Api.DocumentAttributeFilename,
+  );
+  const original =
+    attribute instanceof Api.DocumentAttributeFilename
+      ? attribute.fileName
+      : "";
+  const name =
+    original
+      .split(/[\\/]/)
+      .pop()
+      ?.replace(/[\x00-\x1f\x7f]/g, "")
+      .slice(0, 200) || "Документ";
+  const mime = doc.mimeType.toLowerCase();
+  const kind =
+    mime === "application/pdf" || /\.pdf$/i.test(name)
+      ? "pdf"
+      : mime === "application/epub+zip" || /\.epub$/i.test(name)
+        ? "epub"
+        : undefined;
+  if (!kind) return;
+  return {
+    name: /\.(pdf|epub)$/i.test(name) ? name : `${name}.${kind}`,
+    mime: kind === "pdf" ? "application/pdf" : "application/epub+zip",
+    size: Number(doc.size),
+  };
+}
+export function documentMime(bytes: Buffer) {
+  if (bytes.subarray(0, 1024).includes(Buffer.from("%PDF-")))
+    return "application/pdf";
+  if (
+    bytes.subarray(0, 4).equals(Buffer.from([80, 75, 3, 4])) &&
+    bytes.subarray(0, 1024).includes(Buffer.from("application/epub+zip"))
+  )
+    return "application/epub+zip";
+  throw new Error("Telegram вернул файл, не являющийся PDF или EPUB.");
+}

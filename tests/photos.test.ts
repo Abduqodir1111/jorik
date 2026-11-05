@@ -11,6 +11,9 @@ import { Store } from "../server/store.js";
 import { TelegramIntegration } from "../server/telegram.js";
 import {
   photoInfo,
+  documentInfo,
+  documentMime,
+  MAX_DOCUMENT_BYTES,
   imageMime,
   videoInfo,
   videoMime,
@@ -136,6 +139,116 @@ for (const video of [false, true])
       assert.equal(downloads, 1);
       await assert.rejects(
         integration.photo(randomUUID(), video),
+        /не найдена/,
+      );
+    } finally {
+      await integration.close();
+      db.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+for (const format of ["pdf", "epub"])
+  test(`${format}: повторный импорт обновляет старое сообщение; загрузка через правильный аккаунт и дисковый кэш`, async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jorik-photo-")),
+      db = openDb(dir, "real"),
+      store = new Store(db),
+      integration = new TelegramIntegration(store, {
+        apiId: 123,
+        apiHash: "a".repeat(32),
+        encryptionKey: "b".repeat(64),
+        attachmentDir: path.join(dir, "attachments"),
+      });
+    try {
+      db.prepare("INSERT INTO telegram_peers VALUES(?,?,?,?,?)").run(
+        "telegram-1",
+        "123",
+        "456",
+        "Клиент",
+        "client",
+      );
+      const cid = randomUUID();
+      db.prepare(
+        "INSERT INTO conversations(id,account_id,external_id,name,updated_at) VALUES(?,?,?,?,?)",
+      ).run(cid, "telegram-1", "123", "Клиент", new Date().toISOString());
+      const mid = randomUUID();
+      db.prepare(
+        "INSERT INTO messages(id,conversation_id,external_id,direction,text,status,created_at) VALUES(?,?,?,'in','старое вложение','sent',?)",
+      ).run(mid, cid, "70", new Date().toISOString());
+      const sample = message();
+      const bytes =
+        format === "pdf"
+          ? Buffer.from("%PDF-1.7\nexample")
+          : Buffer.from("PK\x03\x04mimetypeapplication/epub+zip");
+      sample.message = "";
+      sample.media = new Api.MessageMediaDocument({
+        document: new Api.Document({
+          id: bigInt(90),
+          accessHash: bigInt(80),
+          fileReference: Buffer.alloc(0),
+          date: 1,
+          mimeType:
+            format === "pdf" ? "application/pdf" : "application/epub+zip",
+          size: bigInt(bytes.length),
+          dcId: 2,
+          attributes: [
+            new Api.DocumentAttributeFilename({ fileName: `Книга.${format}` }),
+          ],
+        }),
+      });
+      assert.equal(documentInfo(sample)?.name, `Книга.${format}`);
+      assert.equal(documentMime(bytes), documentInfo(sample)?.mime);
+      assert.throws(() => documentMime(Buffer.from("<html>bad</html>")));
+      (sample.media as Api.MessageMediaDocument).ttlSeconds = 1;
+      assert.equal(documentInfo(sample), undefined);
+      (sample.media as Api.MessageMediaDocument).ttlSeconds = undefined;
+      let downloads = 0;
+      integration.client = {
+        connected: true,
+        getMessages: async (peer: Api.InputPeerUser) => {
+          assert.equal(peer.userId.toString(), "123");
+          return [sample];
+        },
+        downloadMedia: async () => {
+          downloads++;
+          return bytes;
+        },
+        destroy: async () => {},
+      } as unknown as TelegramClient;
+      Object.defineProperty(integration, "authenticated", { value: true });
+      await (
+        integration as unknown as {
+          importMessage: (m: Api.Message, u: boolean) => Promise<void>;
+        }
+      ).importMessage(sample, true);
+      assert.equal(store.messages(cid).length, 1);
+      assert.equal(store.conversation(cid).unread, 0);
+      assert.equal(store.messages(cid)[0].text, `Книга.${format}`);
+      assert.equal(
+        store.messages(cid)[0].attachments[0].url,
+        `/api/telegram/documents/${mid}`,
+      );
+      const doc = (sample.media as Api.MessageMediaDocument)
+        .document as Api.Document;
+      const previousSize = doc.size;
+      doc.size = bigInt(MAX_DOCUMENT_BYTES + 1);
+      await assert.rejects(integration.photo(mid, "document"), /больше 50 МБ/);
+      assert.equal(downloads, 0);
+      doc.size = previousSize;
+      const [a, b] = await Promise.all([
+        integration.photo(mid, "document"),
+        integration.photo(mid, "document"),
+      ]);
+      assert.equal(downloads, 1);
+      assert.equal(
+        a.mime,
+        format === "pdf" ? "application/pdf" : "application/epub+zip",
+      );
+      assert.deepEqual(a.bytes, b.bytes);
+      await integration.photo(mid, "document");
+      assert.equal(downloads, 1);
+      await assert.rejects(
+        integration.photo(randomUUID(), "document"),
         /не найдена/,
       );
     } finally {

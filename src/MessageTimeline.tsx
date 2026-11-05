@@ -110,9 +110,30 @@ export default memo(function MessageTimeline({
                   ) : att.kind === "voice" ? (
                     <audio controls preload="none" src={att.url} />
                   ) : (
-                    <a href={att.url} download>
-                      {att.name} · {Math.max(1, Math.ceil(att.size / 1024))} КБ
-                    </a>
+                    <div className="document-attachment">
+                      <strong>
+                        {att.mime === "application/pdf" ? "PDF" : "EPUB"} ·{" "}
+                        {att.name}
+                      </strong>
+                      <span>{Math.max(1, Math.ceil(att.size / 1024))} КБ</span>
+                      <div>
+                        {att.mime === "application/pdf" && (
+                          <a
+                            href={att.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Открыть PDF
+                          </a>
+                        )}
+                        <a
+                          href={`${att.url}${att.url.includes("?") ? "&" : "?"}download=1`}
+                          download={att.name}
+                        >
+                          Скачать
+                        </a>
+                      </div>
+                    </div>
                   )}
                 </div>
               ))}
@@ -130,24 +151,24 @@ export default memo(function MessageTimeline({
               )}
               {m.error && <p className="message-error">{m.error}</p>}
             </div>
-              <div className="message-meta">
-                <time>{time(m.createdAt)}</time>
-                {m.direction === "out" && (
-                  <>
-                    <span>{m.readAt ? "Прочитано" : labels[m.status]}</span>
-                    {m.status === "sent" &&
-                      (m.readAt ? (
-                        <CheckCheck
-                          size={14}
-                          className="read-check"
-                          aria-label="Прочитано клиентом"
-                        />
-                      ) : (
-                        <Check size={14} aria-label="Отправлено" />
-                      ))}
-                  </>
-                )}
-              </div>
+            <div className="message-meta">
+              <time>{time(m.createdAt)}</time>
+              {m.direction === "out" && (
+                <>
+                  <span>{m.readAt ? "Прочитано" : labels[m.status]}</span>
+                  {m.status === "sent" &&
+                    (m.readAt ? (
+                      <CheckCheck
+                        size={14}
+                        className="read-check"
+                        aria-label="Прочитано клиентом"
+                      />
+                    ) : (
+                      <Check size={14} aria-label="Отправлено" />
+                    ))}
+                </>
+              )}
+            </div>
           </div>
         </React.Fragment>
       ))}

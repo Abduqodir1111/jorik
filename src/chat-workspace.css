@@ -56,3 +56,23 @@
  .inbox-page .send { padding:9px; font-size:11px; }
  .inbox-page .bubble { max-width:90%; }
 }
+
+.document-attachment {
+  display: grid;
+  gap: 8px;
+  min-width: 180px;
+  overflow-wrap: anywhere;
+}
+.document-attachment > span {
+  font-size: 0.8em;
+  opacity: 0.75;
+}
+.document-attachment > div {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.document-attachment a {
+  color: inherit;
+  text-decoration: underline;
+}
