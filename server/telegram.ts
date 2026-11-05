@@ -1,3 +1,8 @@
+import {
+  recoveryDelay,
+  telegramNeedsLogin,
+  logRecovery,
+} from "./integration-recovery.js";
 import { CustomFile } from "teleproto/client/uploads";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -98,7 +103,12 @@ export class TelegramIntegration {
   private phoneCodeHash?: string;
   private loginOwner?: string;
   private expiry?: ReturnType<typeof setTimeout>;
-  private poll?: ReturnType<typeof setInterval>;
+  private poll?: ReturnType<typeof setTimeout>;
+  private recovery?: Promise<void>;
+  private recoveryFailures = 0;
+  private recoveryStopped = false;
+  private needsReconnect = false;
+  private nextRecoveryAt: number | null = null;
   private cooldownUntil = 0;
   private codeViaApp = true;
   private background?: Promise<void>;
@@ -132,6 +142,11 @@ export class TelegramIntegration {
       syncing: this.syncing,
       error: this.error,
       codeViaApp: this.codeViaApp,
+      recovery: {
+        attempt: this.recoveryFailures,
+        nextAttemptAt: this.nextRecoveryAt,
+        requiresLogin: this.recoveryStopped,
+      },
       scope:
         "Личные диалоги; до 50 последних диалогов и 30 сообщений при открытии",
       connected: this.authenticated && !!this.client?.connected,
@@ -169,17 +184,39 @@ export class TelegramIntegration {
         langCode: "ru",
       },
     );
-    c.onError = async () => {
-      if (this.authenticated)
+    // Connection timeout alone does not bound RPCs waiting on a dead transport.
+    const invoke = c.invoke.bind(c);
+    c.invoke = (request, dcId, options) =>
+      invoke(request, dcId, {
+        ...options,
+        timeout: options?.timeout ?? 30000,
+      });
+    c.onError = async (error) => {
+      if (
+        this.authenticated &&
+        this.client === c &&
+        !this.closed &&
+        !this.needsReconnect
+      ) {
+        this.needsReconnect = true;
+        this.scheduleRecovery(5000);
+        logRecovery(
+          this.accountId,
+          "retry",
+          this.recoveryFailures,
+          error,
+          5000,
+        );
         this.setState(
           "offline",
           "Связь с Telegram прервана. Повторяем подключение.",
         );
+      }
     };
     c.addEventHandler((event) => {
       this.live = this.live
         .then(async () => {
-          if (this.authenticated && !this.closed)
+          if (this.authenticated && !this.closed && this.client === c)
             await this.importMessage(event.message, true);
         })
         .catch(() => {
@@ -193,6 +230,7 @@ export class TelegramIntegration {
       (update: Api.TypeUpdate) => {
         if (
           this.authenticated &&
+          this.client === c &&
           !this.closed &&
           update instanceof Api.UpdateMessageID
         )
@@ -204,6 +242,7 @@ export class TelegramIntegration {
       (update: Api.TypeUpdate) => {
         if (
           !this.authenticated ||
+          this.client !== c ||
           this.closed ||
           !(update instanceof Api.UpdateReadHistoryOutbox) ||
           !(update.peer instanceof Api.PeerUser)
@@ -217,6 +256,7 @@ export class TelegramIntegration {
       (update: Api.TypeUpdate) => {
         if (
           this.authenticated &&
+          this.client === c &&
           !this.closed &&
           update instanceof Api.UpdateReadHistoryInbox &&
           update.peer instanceof Api.PeerUser
@@ -238,6 +278,12 @@ export class TelegramIntegration {
       );
     if (this.authenticated) throw new Error("Аккаунт уже подключён.");
     if (this.loginBusy) throw new Error("Запрос входа уже выполняется.");
+    if (this.recovery)
+      throw new Error(
+        "Восстанавливаем соединение. Дождитесь завершения попытки.",
+      );
+    clearTimeout(this.poll);
+    this.recoveryStopped = false;
     this.loginBusy = true;
     this.error = null;
     try {
@@ -362,49 +408,158 @@ export class TelegramIntegration {
     this.runBackground();
   }
   restore() {
-    if (!this.ready) return;
-    const saved = this.store.db
-      .prepare("SELECT ciphertext FROM telegram_sessions WHERE account_id=?")
-      .get(this.accountId) as { ciphertext: string } | undefined;
-    if (!saved) return;
-    this.background = (async () => {
-      try {
-        const session = unseal(
-          saved.ciphertext,
-          this.opts.encryptionKey,
-          this.accountId,
-        );
-        const c = this.newClient(session);
-        await c.connect();
-        if (!(await c.checkAuthorization())) throw new Error("AUTH_REVOKED");
-        if (this.closed) return;
-        this.authenticated = true;
-        this.stage = "connected";
-        this.setState("connected", null);
-        await this.sync();
-        this.startPolling();
-      } catch {
-        this.setState(
-          "unconfigured",
-          "Не удалось восстановить сессию. Проверьте сеть и выполните вход, если сессия отозвана.",
-        );
-      }
-    })();
+    if (
+      !this.ready ||
+      !this.store.db
+        .prepare("SELECT 1 FROM telegram_sessions WHERE account_id=?")
+        .get(this.accountId)
+    )
+      return;
+    this.background = this.sync().catch(() => {});
   }
   private runBackground() {
-    this.background = this.sync().catch((e) =>
-      this.setState("offline", safeTelegramError(e)),
-    );
+    this.recoveryStopped = false;
+    this.recoveryFailures = 0;
+    this.needsReconnect = false;
+    this.background = this.sync().catch(() => {});
     this.startPolling();
   }
   private startPolling() {
-    clearInterval(this.poll);
-    this.poll = setInterval(() => {
-      if (!this.syncing && !this.closed && Date.now() >= this.cooldownUntil)
-        this.background = this.sync().catch((e) =>
-          this.setState("offline", safeTelegramError(e)),
+    this.scheduleRecovery(30000);
+  }
+  private scheduleRecovery(delay: number) {
+    clearTimeout(this.poll);
+    if (this.closed || this.recoveryStopped) return;
+    this.nextRecoveryAt = Date.now() + delay;
+    this.poll = setTimeout(() => {
+      this.nextRecoveryAt = null;
+      this.background = this.sync().catch(() => {});
+    }, delay);
+    this.poll.unref?.();
+  }
+  sync(): Promise<void> {
+    if (this.recovery) return this.recovery;
+    if (this.closed)
+      return Promise.reject(new Error("Подключение Telegram закрыто."));
+    if (this.recoveryStopped)
+      return Promise.reject(
+        new Error(this.error || "Выполните вход в Telegram заново."),
+      );
+    clearTimeout(this.poll);
+    this.nextRecoveryAt = null;
+    this.recovery = this.recoverAndSync().finally(() => {
+      this.recovery = undefined;
+    });
+    return this.recovery;
+  }
+  private async recoverAndSync() {
+    try {
+      if (
+        this.loginBusy ||
+        this.stage === "code" ||
+        this.stage === "password"
+      ) {
+        this.scheduleRecovery(30000);
+        return;
+      }
+      if (Date.now() < this.cooldownUntil) {
+        this.scheduleRecovery(this.cooldownUntil - Date.now());
+        throw Object.assign(
+          new Error("Дождитесь завершения ограничения Telegram."),
+          { seconds: (this.cooldownUntil - Date.now()) / 1000 },
         );
-    }, 30000);
+      }
+      const rebuild =
+        this.needsReconnect || !this.authenticated || !this.client?.connected;
+      if (rebuild) {
+        // Never retire a transport while an outbox submission is in flight.
+        if (this.store.busy) {
+          this.scheduleRecovery(1000);
+          return;
+        }
+        const saved = this.store.db
+          .prepare(
+            "SELECT ciphertext FROM telegram_sessions WHERE account_id=?",
+          )
+          .get(this.accountId) as { ciphertext: string } | undefined;
+        if (!saved) throw { errorMessage: "LOGIN_REQUIRED" };
+        let session: string;
+        try {
+          session = unseal(
+            saved.ciphertext,
+            this.opts.encryptionKey,
+            this.accountId,
+          );
+        } catch {
+          throw { errorMessage: "SESSION_DECRYPTION_FAILED" };
+        }
+        this.authenticated = false;
+        await this.client?.destroy();
+        if (this.closed) return;
+        const client = this.newClient(session);
+        await client.connect();
+        if (this.closed) return;
+        // checkAuthorization() hides network errors as false. Probe directly so
+        // a timeout never gets mistaken for a revoked session.
+        await client.invoke(new Api.updates.GetState());
+        this.authenticated = true;
+        this.stage = "connected";
+        this.needsReconnect = false;
+      }
+      await this.syncConnected();
+      if (this.closed) return;
+      if (this.recoveryFailures || rebuild)
+        logRecovery(this.accountId, "connected", this.recoveryFailures);
+      this.recoveryFailures = 0;
+      this.recoveryStopped = false;
+      this.startPolling();
+    } catch (error) {
+      if (this.closed) return;
+      this.recoveryFailures++;
+      this.needsReconnect = true;
+      if (telegramNeedsLogin(error)) {
+        this.recoveryStopped = true;
+        this.authenticated = false;
+        this.stage = "phone";
+        this.nextRecoveryAt = null;
+        clearTimeout(this.poll);
+        await this.client?.destroy().catch(() => {});
+        this.setState(
+          "unconfigured",
+          "Сессия или настройки Telegram недействительны. Проверьте настройки и выполните вход заново.",
+        );
+        logRecovery(
+          this.accountId,
+          "requires_login",
+          this.recoveryFailures,
+          error,
+        );
+      } else {
+        const seconds = Number((error as { seconds?: number })?.seconds) || 0;
+        if (seconds > 0)
+          this.cooldownUntil = Math.max(
+            this.cooldownUntil,
+            Date.now() + seconds * 1000,
+          );
+        const delay = recoveryDelay(
+          this.recoveryFailures,
+          this.cooldownUntil - Date.now(),
+        );
+        this.setState(
+          "offline",
+          `${safeTelegramError(error)} Автоподключение через ${Math.ceil(delay / 1000)} сек.`,
+        );
+        this.scheduleRecovery(delay);
+        logRecovery(
+          this.accountId,
+          "retry",
+          this.recoveryFailures,
+          error,
+          delay,
+        );
+      }
+      throw error;
+    }
   }
   private rememberUser(user: Api.TypeUser) {
     if (
@@ -890,7 +1045,7 @@ export class TelegramIntegration {
       if (!(result instanceof Api.updates.DifferenceSlice)) return;
     }
   }
-  async sync() {
+  private async syncConnected() {
     if (!this.authenticated || this.closed)
       throw new Error("Сначала войдите в Telegram.");
     if (this.syncing) return;
@@ -901,6 +1056,7 @@ export class TelegramIntegration {
     try {
       const c = this.client!;
       if (!c.connected) await c.connect();
+      this.error = null;
       await this.difference();
       let imported = 0;
       // Groups, channels and excluded users must not consume the personal-chat limit.
@@ -1104,10 +1260,12 @@ export class TelegramIntegration {
   };
   async close() {
     this.closed = true;
-    clearInterval(this.poll);
+    clearTimeout(this.poll);
+    this.nextRecoveryAt = null;
     clearTimeout(this.expiry);
     await this.client?.destroy();
     await Promise.allSettled(this.photos.values());
+    await this.recovery?.catch(() => {});
     await this.background?.catch(() => {});
     await this.live.catch(() => {});
   }

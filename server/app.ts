@@ -519,6 +519,7 @@ export async function createApp(opts: {
         ? {
             ...a,
             recentImport: instagrams.get(a.id)?.recentImportStatus(),
+            recovery: instagrams.get(a.id)?.recoveryStatus(),
             receiveMode: instagramOptions.get(a.id)?.receiveMode ?? "polling",
             webhookConfigured:
               !!opts.metaWebhook?.appSecret && !!opts.metaWebhook?.verifyToken,

@@ -1,3 +1,4 @@
+import { recoveryDelay, logRecovery } from "./integration-recovery.js";
 import { reconcileInstagramMessage } from "./instagram-message-key.js";
 import { Readable } from "node:stream";
 import { RECENT_CHAT_LIMIT } from "../shared/inbox.js";
@@ -49,6 +50,13 @@ export class InstagramIntegration {
   private closed = false;
   private controller = new AbortController();
   private timer?: ReturnType<typeof setTimeout>;
+  private started = false;
+  private authBlocked = false;
+  private recoveryFailures = 0;
+  private recoverySince?: string;
+  private catchupSince?: string;
+  private catchupAttempts = 0;
+  private nextRecoveryAt: number | null = null;
   private running?: Promise<void>;
   private archiveRunning?: Promise<{ imported: number }>;
   private archiveStatus: {
@@ -56,6 +64,9 @@ export class InstagramIntegration {
     imported: number;
     error?: string;
   } = { state: "idle", imported: 0 };
+  recoveryStatus() {
+    return {attempt:this.recoveryFailures,nextAttemptAt:this.nextRecoveryAt,requiresLogin:this.authBlocked};
+  }
   recentImportStatus() {
     return { ...this.archiveStatus };
   }
@@ -140,11 +151,13 @@ export class InstagramIntegration {
     }
     if (!response.ok || data.error) {
       const code = data.error?.code;
-      if (code === 190)
+      if (code === 190) {
+        this.authBlocked = true;
         this.state(
           "offline",
           "Токен Instagram истёк или отозван. Обновите токен.",
         );
+      }
       if (response.status === 429 || [4, 17, 32, 613].includes(code))
         this.cooldown = Date.now() + 60000;
       throw Object.assign(
@@ -226,7 +239,7 @@ export class InstagramIntegration {
     }
     return thread;
   }
-  private importThread(thread: Thread, notify: boolean) {
+  private importThread(thread: Thread, notify: boolean, notifySince?: string) {
     if (this.closed || !thread.participants?.data) return;
     const peers = thread.participants.data.filter(
       (p) => p.id !== this.igId && p.id !== this.pageId,
@@ -282,6 +295,7 @@ export class InstagramIntegration {
           continue;
         const out = m.from.id === this.igId || m.from.id === this.pageId;
         if (!out && m.from.id !== peer.id) continue;
+        const notifyMessage = notify && (!notifySince || created.getTime() >= Date.parse(notifySince));
         const key = instagramMessageKey(m.id);
         const previous = db
           .prepare(
@@ -331,11 +345,11 @@ export class InstagramIntegration {
         }
         const read = db.prepare("SELECT read_through FROM instagram_inbox_reads WHERE conversation_id=?").get(id) as { read_through: string } | undefined;
         if (
-          inserted.changes && notify && !out &&
+          inserted.changes && notifyMessage && !out &&
           (!read || created.toISOString() > read.read_through) &&
           Math.abs(Date.now() - created.getTime()) < 60_000
         ) incoming = true;
-        if (inserted.changes && notify && !out && (!read || created.toISOString() > read.read_through))
+        if (inserted.changes && notifyMessage && !out && (!read || created.toISOString() > read.read_through))
           db.prepare("UPDATE conversations SET unread=unread+1 WHERE id=?").run(
             id,
           );
@@ -350,11 +364,11 @@ export class InstagramIntegration {
     })();
     if (incoming) this.store.notifyIncoming();
   }
-  importRecent() {
+  importRecent(recoverySince?: string) {
     if (this.archiveRunning) return this.archiveRunning;
     this.archiveStatus = { state: "running", imported: 0 };
     this.store.changed();
-    this.archiveRunning = this.performRecentImport()
+    this.archiveRunning = this.performRecentImport(recoverySince)
       .then((result) => {
         this.archiveStatus = { state: "complete", imported: result.imported };
         return result;
@@ -376,28 +390,32 @@ export class InstagramIntegration {
       });
     return this.archiveRunning;
   }
-  private async performRecentImport() {
+  private async performRecentImport(recoverySince?: string) {
     if (this.closed) throw new Error("Подключение Instagram закрыто.");
     if (Date.now() < this.cooldown)
       throw new Error("Meta ограничила запросы. Подождите минуту.");
     if (!this.igId) await this.identify();
     const imported = new Set<string>();
     const cursors = new Set<string>();
+    let scanned = 0;
     let after = "";
     for (let page = 0; page < 100 && !this.closed; page++) {
+      if (recoverySince && scanned >= RECENT_CHAT_LIMIT) break;
       const result = await this.request(
-        `${this.pageId}/conversations?platform=instagram&fields=id,updated_time&limit=${Math.min(10, RECENT_CHAT_LIMIT - imported.size)}${after ? "&after=" + encodeURIComponent(after) : ""}`,
+        `${this.pageId}/conversations?platform=instagram&fields=id,updated_time&limit=${Math.min(10, RECENT_CHAT_LIMIT - (recoverySince ? scanned : imported.size))}${after ? "&after=" + encodeURIComponent(after) : ""}`,
       );
       if (!Array.isArray(result.data))
         throw new Error("Meta не вернула список диалогов.");
-      const items = result.data as Thread[];
+      scanned += result.data.length;
+      const items = (result.data as Thread[]).filter(item => !recoverySince || Date.parse(item.updated_time) >= Date.parse(recoverySince));
+      if (recoverySince && !items.length) break;
       for (let offset = 0; offset < items.length && !this.closed; offset += 3) {
         const outcomes = await Promise.allSettled(
           items.slice(offset, offset + 3).map(async (item) => {
             const detail = await this.request(
-              `${encodeURIComponent(item.id)}?fields=${encodeURIComponent(fields.replace("messages.limit(30)", "messages.limit(1)"))}`,
+              `${encodeURIComponent(item.id)}?fields=${encodeURIComponent((recoverySince ? fields : fields.replace("messages.limit(30)", "messages.limit(1)")))}`,
             );
-            this.importThread(detail, false);
+            this.importThread(detail, !!recoverySince, recoverySince);
             const saved = this.store.db
               .prepare(
                 "SELECT id FROM conversations WHERE account_id=? AND external_id=?",
@@ -423,7 +441,47 @@ export class InstagramIntegration {
   sync() {
     if (this.closed) return Promise.resolve();
     if (this.running) return this.running;
-    this.running = this.performSync().finally(() => {
+    this.running = this.performSync().then(() => {
+      if (this.closed) return;
+      this.authBlocked = false;
+      if (this.started && this.opts.receiveMode === "webhook") {
+        if (this.recoveryFailures) logRecovery(this.accountId,"connected",this.recoveryFailures);
+        this.recoveryFailures = 0;
+        this.scheduleCheck(60000);
+        const since = this.catchupSince || this.recoverySince;
+        this.recoverySince = undefined;
+        if (since && this.archiveRunning) this.catchupSince = since;
+        if (since && !this.archiveRunning) {
+          this.catchupSince = undefined;
+          this.catchupAttempts++;
+          void this.importRecent(since).catch(error => {
+            if (this.closed) return;
+            logRecovery(this.accountId,"catchup_failed",this.catchupAttempts,error);
+            const code = (error as {graphCode?:number}).graphCode;
+            if (this.catchupAttempts < 3 && (code === undefined || [1,-2,4,17,32,613].includes(code))) this.catchupSince = since;
+          });
+        }
+      }
+    }, error => {
+      if (!this.closed && this.started && this.opts.receiveMode === "webhook") {
+        this.recoveryFailures++;
+        this.recoverySince ??= this.recoveryBoundary();
+        this.catchupAttempts = 0;
+        const code = (error as {graphCode?:number}).graphCode;
+        if ([190,10,200].includes(code ?? 0)) {
+          this.authBlocked = true;
+          this.nextRecoveryAt = null;
+          clearTimeout(this.timer);
+          this.state("unconfigured", "Токен или разрешения Instagram недействительны. Обновите подключение в настройках.");
+          logRecovery(this.accountId,"requires_login",this.recoveryFailures,error);
+        } else {
+          const delay = recoveryDelay(this.recoveryFailures,this.cooldown-Date.now());
+          this.scheduleCheck(delay);
+          logRecovery(this.accountId,"retry",this.recoveryFailures,error,delay);
+        }
+      }
+      throw error;
+    }).finally(() => {
       this.running = undefined;
     });
     return this.running;
@@ -679,15 +737,33 @@ export class InstagramIntegration {
       if (this.opts.receiveMode === "webhook")
         this.store.db
           .prepare(
-            "UPDATE accounts SET state='connected',error=NULL,last_sync=? WHERE id=?",
+            "UPDATE accounts SET state=CASE WHEN ? THEN state ELSE 'connected' END,error=CASE WHEN ? THEN error ELSE NULL END,last_sync=? WHERE id=?",
           )
-          .run(new Date().toISOString(), this.accountId);
+          .run(this.authBlocked ? 1 : 0, this.authBlocked ? 1 : 0, new Date().toISOString(), this.accountId);
       this.store.changed();
     }
     return handled;
   }
+  private recoveryBoundary() {
+    const last = this.store.account(this.accountId).lastSync;
+    return last && Number.isFinite(Date.parse(last)) ? new Date(Date.parse(last)-2000).toISOString() : undefined;
+  }
+  private scheduleCheck(delay: number) {
+    clearTimeout(this.timer);
+    if (this.closed || this.authBlocked) return;
+    this.nextRecoveryAt = Date.now()+delay;
+    this.timer = setTimeout(() => {
+      this.nextRecoveryAt = null;
+      void this.sync().catch(() => {});
+    },delay);
+    this.timer.unref?.();
+  }
   start() {
+    if (this.started || this.closed) return;
+    this.started = true;
     if (this.opts.receiveMode === "webhook") {
+      const last = this.store.account(this.accountId).lastSync;
+      if (last && Date.now()-Date.parse(last)>60000) this.recoverySince = this.recoveryBoundary();
       void this.sync().catch(() => {});
       return;
     }
