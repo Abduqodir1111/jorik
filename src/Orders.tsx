@@ -1,9 +1,9 @@
 import CompactOrderForm from "./CompactOrderForm";
 import { customerOrderHistory } from "../shared/order-form";
-import StoreBadge from "./StoreBadge";
+import OrderCard from "./OrderCard";
 import { coalesceAsync } from "./refresh-queue";
 import { useEffect, useRef, useState } from "react";
-import { Plus, Pencil, Trash2, Ban, X, Download, Package } from "lucide-react";
+import { Plus, X, Download, Package } from "lucide-react";
 import {
   localDate,
   courierRows,
@@ -184,7 +184,7 @@ export default function Orders({
     Number(amount) > 0 &&
     Number(amount) <= 1e12 &&
     !!form.items.trim() &&
-    (form.deliveryType === "pickup" || !!form.district);
+    (form.deliveryType !== "delivery" || !!form.district);
   async function save() {
     if (!valid || !form || busy) return;
     setBusy(true);
@@ -264,7 +264,7 @@ export default function Orders({
               <h1>
                 Заказы <small>{orders.length}</small>
               </h1>
-              <p>Доставка и самовывоз · Storebooks и Mangastore</p>
+              <p>Доставка, самовывоз и почта · Storebooks и Mangastore</p>
             </div>
             <button className="primary" onClick={() => open()}>
               <Plus size={18} />
@@ -301,104 +301,12 @@ export default function Orders({
                   Excel
                 </button>
               </header>
-              <div className="orders-table-wrap">
-                <table className="orders-table">
-                  <thead>
-                    <tr>
-                      {[
-                        "Клиент / источник",
-                        "Телефон",
-                        "Получение",
-                        "Сумма",
-                        "Заказ",
-                        "Действия",
-                      ].map((h) => (
-                        <th key={h}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orders
-                      .filter((o) => o.date === day)
-                      .map((o) => (
-                        <tr
-                          key={o.id}
-                          className={
-                            o.refused
-                              ? "order-refused"
-                              : o.isPaid
-                                ? "order-paid"
-                                : ""
-                          }
-                        >
-                          <td>
-                            <strong>{o.client}</strong>
-                            <StoreBadge name={o.source} />
-                            {o.refused && (
-                              <span className="order-tag refused">Отказ</span>
-                            )}
-                          </td>
-                          <td className="order-phone-text">
-                            {o.phone.replace(
-                              /^\+998(\d{2})(\d{3})(\d{2})(\d{2})$/,
-                              "+998 ($1) $2-$3-$4",
-                            )}
-                          </td>
-                          <td>
-                            {o.deliveryType === "pickup" ? (
-                              <span className="order-tag pickup">
-                                САМОВЫВОЗ
-                              </span>
-                            ) : (
-                              <>
-                                <strong>{o.district}</strong>
-                                <small>{o.address || "Адрес не указан"}</small>
-                                {o.coordinates && (
-                                  <small>{o.coordinates}</small>
-                                )}
-                              </>
-                            )}
-                          </td>
-                          <td className="order-money">
-                            {o.amount.toLocaleString("ru-RU")} сум
-                            {o.isPaid && (
-                              <span className="order-tag paid">Оплачено</span>
-                            )}
-                          </td>
-                          <td className="order-items">{o.items}</td>
-                          <td>
-                            <div className="order-actions">
-                              <button
-                                title="Редактировать заказ"
-                                aria-label="Редактировать заказ"
-                                onClick={() => open(o)}
-                              >
-                                <Pencil size={17} />
-                              </button>
-                              <button
-                                disabled={busy}
-                                title={o.refused ? "Вернуть заказ" : "Отказ"}
-                                aria-label={
-                                  o.refused ? "Вернуть заказ" : "Отказ"
-                                }
-                                onClick={() => void modify(o, "refuse")}
-                              >
-                                <Ban size={17} />
-                              </button>
-                              <button
-                                disabled={busy}
-                                title="Удалить заказ"
-                                aria-label="Удалить заказ"
-                                onClick={() => void modify(o, "delete")}
-                              >
-                                <Trash2 size={17} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
+              <div className="orders-grid" role="list" aria-label={`Заказы на ${groupTitle(day)}`}>
+                {orders.filter(o => o.date === day).map(o => (
+                  <OrderCard key={o.id} order={o} busy={busy} onEdit={open}
+                    onRefuse={order => void modify(order, "refuse")}
+                    onDelete={order => void modify(order, "delete")} />
+                ))}
               </div>
             </section>
           ))}
@@ -408,7 +316,7 @@ export default function Orders({
         <aside
           className={
             "order-drawer compact-order-drawer " +
-            (form.deliveryType === "pickup" ? "is-pickup" : "is-delivery")
+            (form.deliveryType !== "delivery" ? "is-pickup" : "is-delivery")
           }
           aria-label="Оформление заказа"
         >
@@ -453,7 +361,7 @@ export default function Orders({
             <small>
               {o.amount.toLocaleString("ru-RU")} сум ·{" "}
               {o.refused ? "Отказ" : o.isPaid ? "Оплачено" : "Не оплачено"} ·{" "}
-              {o.deliveryType === "pickup" ? "Самовывоз" : o.district}
+              {o.deliveryType === "pickup" ? "Самовывоз" : o.deliveryType === "mail" ? "Почта" : o.district}
             </small>
           </article>
         ))}

@@ -140,11 +140,6 @@
 .order-group { margin-bottom:24px; }
 .order-group h2 { font-size:13px; font-weight:650; }
 .order-group > header > button { color:var(--muted); font-size:11px; }
-.orders-table-wrap { background:var(--surface); border:1px solid var(--line); border-radius:13px; box-shadow:0 1px 3px #0001; }
-.orders-table { font-size:12px; min-width:720px; }
-.orders-table th { background:var(--canvas); font-size:10px; letter-spacing:.04em; text-transform:uppercase; padding:12px; }
-.orders-table td { padding:14px 12px; vertical-align:top; }
-.orders-table td > .store-badge { margin-top:6px; }
 .order-drawer { background:var(--surface); border-left:1px solid var(--line); box-shadow:-6px 0 24px #0f172a10; }
 .order-drawer form { padding:18px; }
 .order-drawer header { padding-bottom:14px; border-bottom:1px solid var(--line); margin-bottom:16px; }

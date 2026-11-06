@@ -347,3 +347,8 @@
   .settings-session-card .settings-logout { width:100%; font-size:14px; }
   .settings-accounts-toggle { min-height:44px; }
 }
+.settings-slots { grid-template-columns:minmax(0,1fr); }
+.settings-slots kbd { right:50px; }
+.settings-slots .template-delete { position:absolute; top:-13px; right:10px; display:grid; place-items:center; padding:5px; color:#dc2626; background:var(--surface); border:1px solid var(--line); border-radius:6px; }
+.settings-slots .template-delete:hover { background:#fee2e2; }
+.template-add { display:flex; align-items:center; gap:6px; margin:14px 0; padding:9px 12px; border:1px solid var(--line); border-radius:8px; color:var(--accent); }

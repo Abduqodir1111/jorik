@@ -4,7 +4,7 @@ import React, {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { AlertCircle, Check, CheckCheck, Reply, X } from "lucide-react";
+import { AlertCircle, Clock, Check, CheckCheck, Reply, X } from "lucide-react";
 import type { Account, Message } from "../shared/types";
 import Photo from "./Photo";
 import Video from "./Video";
@@ -50,6 +50,11 @@ export default memo(function MessageTimeline({
             <div
               className={
                 "bubble " +
+                (m.attachments.length === 0 &&
+                !m.error &&
+                !m.text.startsWith("[Вложение Instagram")
+                  ? "text-only "
+                  : "") +
                 (m.status === "error" || m.status === "unknown" ? "failed" : "")
               }
             >
@@ -166,24 +171,38 @@ export default memo(function MessageTimeline({
                 </button>
               )}
               {m.error && <p className="message-error">{m.error}</p>}
-            </div>
-            <div className="message-meta">
-              <time>{time(m.createdAt)}</time>
-              {m.direction === "out" && (
-                <>
-                  <span>{m.readAt ? "Прочитано" : labels[m.status]}</span>
-                  {m.status === "sent" &&
-                    (m.readAt ? (
-                      <CheckCheck
-                        size={14}
-                        className="read-check"
-                        aria-label="Прочитано клиентом"
-                      />
-                    ) : (
-                      <Check size={14} aria-label="Отправлено" />
-                    ))}
-                </>
-              )}
+              <span className="message-meta">
+                <time>{time(m.createdAt)}</time>
+                {m.direction === "out" && (
+                  <>
+                    {m.status !== "sent" &&
+                      (m.status === "queued" || m.status === "sending" ? (
+                        <Clock
+                          size={13}
+                          aria-label={labels[m.status]}
+                          role="img"
+                        />
+                      ) : (
+                        <AlertCircle
+                          size={13}
+                          aria-label={labels[m.status]}
+                          role="img"
+                        />
+                      ))}
+                    {m.status === "sent" &&
+                      (m.readAt ? (
+                        <CheckCheck
+                          size={14}
+                          className="read-check"
+                          aria-label="Прочитано клиентом"
+                          role="img"
+                        />
+                      ) : (
+                        <Check size={14} aria-label="Отправлено" role="img" />
+                      ))}
+                  </>
+                )}
+              </span>
             </div>
           </div>
         </React.Fragment>

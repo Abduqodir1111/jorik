@@ -17,7 +17,7 @@ const schema = z
     source: z.string().trim().min(1).max(100),
     date,
     phone: z.string().regex(/^\+998\d{9}$/, "Введите 9 цифр после +998"),
-    deliveryType: z.enum(["delivery", "pickup"]),
+    deliveryType: z.enum(["delivery", "pickup", "mail"]),
     district: z.string().max(50),
     address: z.string().trim().max(2000),
     coordinates: z.string().trim().max(2000),
@@ -28,7 +28,7 @@ const schema = z
   .strict()
   .refine(
     (o) =>
-      o.deliveryType === "pickup" || districts.some((d) => d === o.district),
+      o.deliveryType !== "delivery" || districts.some((d) => d === o.district),
     { message: "Выберите район доставки", path: ["district"] },
   );
 type Row = {
@@ -70,7 +70,7 @@ export function registerOrders(app: FastifyInstance, store: Store) {
       o.source = a.name;
     } else if (!o.conversationId && !manualSources.some((s) => s === o.source))
       throw new Error("Неверный источник ручного заказа");
-    if (o.deliveryType === "pickup") {
+    if (o.deliveryType !== "delivery") {
       o.district = "";
       o.address = "";
       o.coordinates = "";

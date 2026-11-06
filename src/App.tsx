@@ -1,3 +1,4 @@
+import { quickReplyHotkey, nextTemplateIndex } from "../shared/quick-replies";
 import SettingsView from "./SettingsView";
 import LogoutDialog from "./LogoutDialog";
 import StoreBadge from "./StoreBadge";
@@ -585,6 +586,9 @@ export default function App() {
       setUploading(false);
     }
   }
+  useEffect(() => {
+    setTemplateIndex(i => Math.min(i, Math.max(0, slots.length - 1)));
+  }, [slots]);
   function insertTemplate(index: number) {
     if (!slots[index]?.text || !selected) return;
     draft(slots[index].text);
@@ -616,10 +620,9 @@ export default function App() {
           setTemplatesOpen(false);
         }
       }
-      if (event.ctrlKey && !event.altKey && /^[1-4]$/.test(event.key)) {
-        event.preventDefault();
+      if (event.ctrlKey && !event.altKey && /^[1-9]$/.test(event.key)) {
         const slot = slots[Number(event.key) - 1];
-        if (slot.text.trim()) void send(slot.text);
+        if (slot?.text.trim()) { event.preventDefault(); void send(slot.text); }
       }
     };
     window.addEventListener("keydown", keydown);
@@ -959,7 +962,7 @@ export default function App() {
                       setOrderRequest((x) => x + 1);
                     }}
                   >
-                    <Package size={17} /><span>{orderPanelOpen?"Свернуть заказ":"Открыть заказ"}</span>
+                    <Package size={17} /><span>{orderPanelOpen?"Свернуть заказ":"Создать заказ"}</span>
                   </button>
                   <button
                     title="Информация о клиенте"
@@ -1040,7 +1043,7 @@ export default function App() {
                     <span className="quick-replies-label">Шаблоны:</span>
                     {slots.map((slot, i) => (
                       <button
-                        key={i}
+                        key={slot.id}
                         className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300"
                         title={slot.text || "Настройте этот слот в настройках"}
                         onClick={() =>
@@ -1068,7 +1071,7 @@ export default function App() {
                     >
                       {slots.map((slot, i) => (
                         <button
-                          key={i}
+                          key={slot.id}
                           role="option"
                           aria-selected={templateIndex === i}
                           disabled={!slot.text}
@@ -1077,7 +1080,7 @@ export default function App() {
                         >
                           <b>{slot.title || `Слот ${i + 1}`}</b>
                           <span>{slot.text || "Не настроен"}</span>
-                          <kbd>Ctrl + {i + 1}</kbd>
+                          {quickReplyHotkey(i) && <kbd>{quickReplyHotkey(i)}</kbd>}
                         </button>
                       ))}
                     </div>
@@ -1153,7 +1156,7 @@ export default function App() {
                             insertTemplate(templateIndex);
                           else
                             setTemplateIndex(
-                              (i) => (i + (e.key === "ArrowDown" ? 1 : 3)) % 4,
+                              (i) => nextTemplateIndex(i, e.key === "ArrowDown" ? 1 : -1, slots.length),
                             );
                           return;
                         }
@@ -1215,7 +1218,7 @@ export default function App() {
                   <div className="composer-bottom">
                     <span>
                       Enter — отправить · / — шаблоны · Alt + ↑↓ — чаты · Ctrl +
-                      1–4 — отправить шаблон
+                      1–9 — отправить шаблон
                     </span>
                     {mode === "demo" && (
                       <button

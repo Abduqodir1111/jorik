@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from "react";
-import { Check, LogOut, Volume2, Sun, Moon, Save, Server, Users, ChevronDown } from "lucide-react";
+import { Plus, Trash2, Check, LogOut, Volume2, Sun, Moon, Save, Server, Users, ChevronDown } from "lucide-react";
 import { useOperator } from "./OperatorContext";
 import type { Mode } from "../shared/types";
 import "./settings-view.css";
+import { MAX_QUICK_REPLIES, quickReplyHotkey } from "../shared/quick-replies";
 import { useWebPush } from "./useWebPush";
 
 type Props = {
@@ -39,7 +40,9 @@ export default function SettingsView({
     dark,
     toggleTheme,
     slots,
-    updateSlot,
+    addTemplate,
+    removeTemplate,
+    updateTemplate,
     saveStatus,
     saveSlots,
   } = useOperator();
@@ -208,17 +211,18 @@ export default function SettingsView({
             <div>
               <h2>Быстрые ответы на панели</h2>
               <p>
-                Кнопка вставляет текст. Ctrl + 1–4 сразу отправляет шаблон в
+                Кнопка вставляет текст. Ctrl + 1–9 сразу отправляет шаблон в
                 чат.
               </p>
             </div>
-            <span className="slot-count">4 слота шаблонов</span>
+            <span className="slot-count">{slots.length} / {MAX_QUICK_REPLIES} шаблонов</span>
           </header>
           <div className="settings-slots">
             {slots.map((slot, i) => (
-              <fieldset key={i}>
+              <fieldset key={slot.id}>
                 <legend>Слот {i + 1}</legend>
-                <kbd>Ctrl + {i + 1}</kbd>
+                {quickReplyHotkey(i) && <kbd>{quickReplyHotkey(i)}</kbd>}
+                <button type="button" className="template-delete" aria-label={`Удалить шаблон ${i + 1}`} onClick={() => removeTemplate(slot.id)}><Trash2 size={16} /></button>
                 <label>
                   Название кнопки
                   <input
@@ -228,7 +232,7 @@ export default function SettingsView({
                     placeholder="Например, 🚚 Доставка"
                     onChange={(e) => {
                       setResult("");
-                      updateSlot(i, { title: e.target.value });
+                      updateTemplate(slot.id, "title", e.target.value);
                     }}
                   />
                 </label>
@@ -242,13 +246,14 @@ export default function SettingsView({
                     placeholder="Текст ответа клиенту…"
                     onChange={(e) => {
                       setResult("");
-                      updateSlot(i, { text: e.target.value });
+                      updateTemplate(slot.id, "text", e.target.value);
                     }}
                   />
                 </label>
               </fieldset>
             ))}
           </div>
+          <button type="button" className="template-add" disabled={slots.length >= MAX_QUICK_REPLIES} onClick={addTemplate}><Plus size={16} /> Добавить шаблон</button>
           <small role="status">
             {saveStatus ||
               "Быстрые ответы автоматически сохраняются на сервере."}

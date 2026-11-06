@@ -6,13 +6,19 @@ import {
   useState,
   type ReactNode,
 } from "react";
-export type QuickReply = { title: string; text: string };
-const empty = () => Array.from({ length: 4 }, () => ({ title: "", text: "" }));
+import {
+  normalizeQuickReplies,
+  MAX_QUICK_REPLIES,
+  type QuickReply,
+} from "../shared/quick-replies";
+export type { QuickReply } from "../shared/quick-replies";
 const Context = createContext<{
   fontSize: number;
   setFontSize: (size: number) => void;
   slots: QuickReply[];
-  updateSlot: (i: number, patch: Partial<QuickReply>) => void;
+  addTemplate: () => void;
+  removeTemplate: (id: string) => void;
+  updateTemplate: (id: string, field: "title" | "text", value: string) => void;
   hydrate: (value?: string) => void;
   saveStatus: string;
   saveSlots: () => Promise<void>;
@@ -38,7 +44,7 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
       localStorage.setItem("jorik-font-size", String(fontSize));
     } catch {}
   }, [fontSize]);
-  const [slots, setSlots] = useState<QuickReply[]>(empty),
+  const [slots, setSlots] = useState<QuickReply[]>([]),
     [saveStatus, setSaveStatus] = useState("");
   const [dark, setDark] = useState(() => {
     try {
@@ -61,14 +67,8 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
   const hydrate = (value?: string) => {
     if (dirty.current) return;
     try {
-      const parsed = value ? JSON.parse(value) : empty();
-      if (
-        Array.isArray(parsed) &&
-        parsed.length === 4 &&
-        parsed.every(
-          (s) => typeof s.title === "string" && typeof s.text === "string",
-        )
-      ) {
+      const parsed = normalizeQuickReplies(value ? JSON.parse(value) : []);
+      if (parsed) {
         latest.current = parsed;
         setSlots((old) =>
           JSON.stringify(old) === JSON.stringify(parsed) ? old : parsed,
@@ -76,10 +76,7 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
       }
     } catch {}
   };
-  function updateSlot(i: number, patch: Partial<QuickReply>) {
-    const next = latest.current.map((s, index) =>
-      index === i ? { ...s, ...patch } : s,
-    );
+  function changeTemplates(next: QuickReply[]) {
     latest.current = next;
     setSlots(next);
     dirty.current = true;
@@ -108,16 +105,43 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
         );
     }, 400);
   }
+  function addTemplate() {
+    if (latest.current.length >= MAX_QUICK_REPLIES) return;
+    changeTemplates([
+      ...latest.current,
+      { id: crypto.randomUUID(), title: "", text: "" },
+    ]);
+  }
+  function removeTemplate(id: string) {
+    changeTemplates(latest.current.filter((s) => s.id !== id));
+  }
+  function updateTemplate(id: string, field: "title" | "text", value: string) {
+    changeTemplates(
+      latest.current.map((s) => (s.id === id ? { ...s, [field]: value } : s)),
+    );
+  }
   async function saveSlots() {
-    if(timer.current) clearTimeout(timer.current);
-    const next=latest.current, revision=++version.current;
+    if (timer.current) clearTimeout(timer.current);
+    const next = latest.current,
+      revision = ++version.current;
     setSaveStatus("Сохранение…");
-    const task=chain.current.catch(()=>{}).then(async()=>{
-      const r=await fetch("/api/quick-replies",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(next)});
-      if(!r.ok) throw Error("Не удалось сохранить быстрые ответы");
-      if(version.current===revision){dirty.current=false;setSaveStatus("Сохранено");}
+    const task = chain.current
+      .catch(() => {})
+      .then(async () => {
+        const r = await fetch("/api/quick-replies", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(next),
+        });
+        if (!r.ok) throw Error("Не удалось сохранить быстрые ответы");
+        if (version.current === revision) {
+          dirty.current = false;
+          setSaveStatus("Сохранено");
+        }
+      });
+    chain.current = task.catch(() => {
+      setSaveStatus("Не удалось сохранить. Повторите попытку.");
     });
-    chain.current=task.catch(()=>{setSaveStatus("Не удалось сохранить. Повторите попытку.");});
     await task;
   }
   useEffect(() => {
@@ -127,8 +151,8 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(latest.current),
-          keepalive: true,
-        });
+          keepalive: new Blob([JSON.stringify(latest.current)]).size < 60000,
+        }).catch(() => {});
     };
     window.addEventListener("pagehide", flush);
     return () => {
@@ -142,7 +166,9 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
         fontSize,
         setFontSize,
         slots,
-        updateSlot,
+        addTemplate,
+        removeTemplate,
+        updateTemplate,
         hydrate,
         saveStatus,
         saveSlots,
@@ -152,43 +178,5 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
     >
       {children}
     </Context.Provider>
-  );
-}
-export function QuickReplySettings() {
-  const { slots, updateSlot, saveStatus } = useOperator();
-  return (
-    <section className="settings-card">
-      <h2>Быстрые ответы на панели</h2>
-      <p>
-        Кнопка вставляет текст. Ctrl + 1–4 сразу отправляет шаблон в открытый
-        чат.
-      </p>
-      <div className="slot-grid">
-        {slots.map((slot, i) => (
-          <fieldset key={i}>
-            <legend>Слот {i + 1}</legend>
-            <label>
-              Название кнопки
-              <input
-                maxLength={40}
-                value={slot.title}
-                placeholder="Например, 👋 Приветствие"
-                onChange={(e) => updateSlot(i, { title: e.target.value })}
-              />
-            </label>
-            <label>
-              Текст шаблона
-              <textarea
-                maxLength={4000}
-                value={slot.text}
-                placeholder="Текст ответа клиенту…"
-                onChange={(e) => updateSlot(i, { text: e.target.value })}
-              />
-            </label>
-          </fieldset>
-        ))}
-      </div>
-      <small role="status">{saveStatus}</small>
-    </section>
   );
 }

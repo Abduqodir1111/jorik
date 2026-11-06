@@ -96,3 +96,17 @@
 .message-quote span { font-size: .9em; opacity: .85; }
 .message-row.out .message-quote { border-left-color: #c4dcff; background: rgba(255,255,255,.13); }
 .message-row.out .message-quote strong { color: #e5efff; }
+
+/* The whole template array stays on one horizontally scrollable row. */
+.inbox-page .quick-replies { min-width:0; max-width:100%; overflow-x:auto; flex-wrap:nowrap; }
+.inbox-page .quick-replies button { flex-shrink:0; white-space:nowrap; }
+.inbox-page .template-menu { max-height:260px; overflow-y:auto; }
+.inbox-page .chat-header .create-order { background:#16a34a; color:#fff; }
+.inbox-page .chat-header .create-order:hover,
+.inbox-page .chat-header .create-order[aria-pressed=true] { background:#15803d; color:#fff; }
+.inbox-page .bubble { display:flow-root; }
+.inbox-page .bubble.text-only > p { display:inline; margin:0; }
+.inbox-page .bubble .message-meta { display:flex; justify-content:flex-end; align-items:center; gap:4px; margin:5px 0 -2px; font:11px/16px ui-sans-serif,system-ui,sans-serif; white-space:nowrap; color:var(--muted); opacity:.8; }
+.inbox-page .bubble.text-only .message-meta { display:inline-flex; float:right; margin:5px 0 -2px 12px; }
+.inbox-page .out .bubble:not(.failed) .message-meta { color:#dbeafe; }
+.inbox-page .bubble .message-meta .read-check { color:inherit; }

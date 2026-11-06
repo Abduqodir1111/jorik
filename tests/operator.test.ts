@@ -47,7 +47,7 @@ test("Operator: persisted slots/statuses, validated uploads/replies, idempotency
         await app.inject({
           method: "PUT",
           url: "/api/quick-replies",
-          payload: slots.slice(1),
+          payload: [{ title: "x".repeat(41), text: "invalid" }],
         })
       ).statusCode,
       400,

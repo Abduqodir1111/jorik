@@ -1,3 +1,4 @@
+import { MAX_QUICK_REPLIES } from "../shared/quick-replies.js";
 import { registerProfilePhotos } from "./profile-photos.js";
 import { PushService, loadVapid, type PushOptions } from "./push.js";
 import { registerOrders } from "./orders.js";
@@ -656,14 +657,15 @@ export async function createApp(opts: {
       return { ok: true };
     },
   );
-  app.put("/api/quick-replies", async (req) => {
+  app.put("/api/quick-replies", { bodyLimit: 3 * 1024 * 1024 }, async (req) => {
     const slots = z
       .array(
         z
-          .object({ title: z.string().max(40), text: z.string().max(4000) })
+          .object({ id: z.string().min(1).max(80).optional(), title: z.string().max(40), text: z.string().max(4000) })
           .strict(),
       )
-      .length(4)
+      .max(MAX_QUICK_REPLIES)
+      .refine(slots => { const ids = slots.flatMap(s => s.id ? [s.id] : []); return new Set(ids).size === ids.length; }, "Повторяющиеся идентификаторы шаблонов")
       .parse(req.body);
     db.prepare(
       "INSERT INTO settings VALUES('quickReplies',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",

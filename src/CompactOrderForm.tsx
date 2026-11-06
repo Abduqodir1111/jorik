@@ -182,14 +182,14 @@ export default function CompactOrderForm({
             role="group"
             aria-labelledby="delivery-type-label"
           >
-            {(["delivery", "pickup"] as const).map((t) => (
+            {(["delivery", "pickup", "mail"] as const).map((t) => (
               <button
                 key={t}
                 type="button"
                 aria-pressed={f.deliveryType === t}
                 onClick={() => onChange({ deliveryType: t })}
               >
-                {t === "delivery" ? "Доставка" : "Самовывоз"}
+                {t === "delivery" ? "Доставка" : t === "mail" ? "Почта" : "Самовывоз"}
               </button>
             ))}
           </div>

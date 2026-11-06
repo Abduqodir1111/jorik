@@ -96,44 +96,10 @@
   font-size: 17px;
   margin: 0;
 }
-.orders-table-wrap {
-  overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--surface, #fff);
-}
-.orders-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.orders-table th {
-  text-align: left;
-  font-size: 11px;
-  color: var(--muted);
-  font-weight: 600;
-  background: var(--hover);
-  padding: 13px 16px;
-}
-.orders-table td {
-  padding: 16px;
-  border-top: 1px solid var(--line);
-  vertical-align: top;
-}
-.orders-table td strong,
-.orders-table td small {
-  display: block;
-}
-.orders-table small {
-  color: var(--muted);
-  margin-top: 5px;
-  max-width: 240px;
-  overflow-wrap: anywhere;
-}
 .order-items {
   white-space: pre-wrap;
-  min-width: 190px;
-  max-width: 350px;
+  min-width: 0;
+  max-width: 100%;
   overflow-wrap: anywhere;
 }
 .order-money {
@@ -349,8 +315,7 @@
   color: white;
 }
 .dark .order-drawer,
-.dark .order-history,
-.dark .orders-table-wrap {
+.dark .order-history {
   --surface: #172033;
 }
 .dark .order-drawer input,
@@ -417,3 +382,34 @@
     padding: 16px;
   }
 }
+
+.orders-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:20px; align-items:stretch; }
+.order-card { min-width:0; display:flex; flex-direction:column; gap:16px; padding:18px; border:1px solid var(--line); border-radius:16px; background:var(--surface); box-shadow:0 2px 8px #0f172a08; }
+.order-card.order-paid { background:var(--surface); border-color:color-mix(in srgb,#22c55e 35%,var(--line)); }
+.order-card.order-refused { background:color-mix(in srgb,#ef4444 5%,var(--surface)); }
+.order-card-header { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+.order-card-client { min-width:0; flex:1; display:flex; align-items:flex-start; flex-wrap:wrap; gap:6px; }
+.order-card-client h3 { flex-basis:100%; margin:0; font-size:15px; font-weight:700; line-height:1.4; overflow-wrap:anywhere; }
+.order-card-client .store-badge { max-width:100%; overflow-wrap:anywhere; white-space:normal; }
+.order-card .order-actions { flex-shrink:0; gap:2px; }
+.order-card .order-actions button { min-width:30px; min-height:32px; padding:6px; border-radius:7px; color:var(--muted); }
+.order-card .order-actions button:hover { background:var(--hover); color:var(--ink); }
+.order-card .order-actions button:last-child:hover { color:#dc2626; background:#fee2e2; }
+.order-card-contact { display:flex; flex-direction:column; gap:10px; font-size:12px; }
+.order-card-contact > a { display:inline-flex; align-items:center; gap:7px; color:var(--muted); text-decoration:none; font-variant-numeric:tabular-nums; }
+.order-card-contact > a:hover { color:var(--accent); }
+.order-card-type { display:inline-flex; align-items:center; gap:7px; font-weight:600; }
+.order-card-logistics p { margin:5px 0 0; color:var(--muted); line-height:1.6; overflow-wrap:anywhere; }
+.order-card-logistics small { display:flex; align-items:flex-start; gap:5px; margin-top:5px; color:var(--muted); overflow-wrap:anywhere; }
+.order-card-logistics svg { flex-shrink:0; }
+.order-card-items { min-width:0; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--hover); }
+.order-card-items > span { display:block; margin-bottom:8px; font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); }
+.order-card-items .order-items { margin:0; line-height:1.65; font-size:13px; }
+.order-card-footer { margin-top:auto; padding-top:12px; border-top:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+.order-card-footer .order-money { white-space:normal; overflow-wrap:anywhere; font-size:17px; }
+.order-card-footer .order-money small { font-size:12px; font-weight:400; color:var(--muted); }
+.order-card .order-tag { margin:0; }
+.order-tag.unpaid { color:var(--muted); background:var(--hover); border:1px solid var(--line); }
+@media(min-width:768px) { .orders-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(min-width:1120px) { .orders-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media(min-width:1600px) { .orders-grid { grid-template-columns:repeat(4,minmax(0,1fr)); } }

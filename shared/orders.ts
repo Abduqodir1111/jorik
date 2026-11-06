@@ -24,7 +24,7 @@ export interface OrderInput {
   source: string;
   date: string;
   phone: string;
-  deliveryType: "delivery" | "pickup";
+  deliveryType: "delivery" | "pickup" | "mail";
   district: string;
   address: string;
   coordinates: string;
@@ -54,7 +54,7 @@ export const courierHeaders = [
 export function courierRows(orders: Order[], date: string) {
   return orders
     .filter(
-      (o) => o.date === date && o.deliveryType === "delivery" && !o.refused,
+      (o) => o.date === date && ["delivery", "mail"].includes(o.deliveryType) && !o.refused,
     )
     .map((o) => [
       o.source,
@@ -64,6 +64,6 @@ export function courierRows(orders: Order[], date: string) {
       o.district,
       o.address,
       o.coordinates,
-      "",
+      o.deliveryType === "mail" ? "Почта" : "",
     ]);
 }
