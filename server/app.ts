@@ -1,4 +1,5 @@
 import { registerProfilePhotos } from "./profile-photos.js";
+import { PushService, loadVapid, type PushOptions } from "./push.js";
 import { registerOrders } from "./orders.js";
 import { imageMime } from "./telegram-photos.js";
 import { registerMetaWebhook } from "./meta-webhook.js";
@@ -25,6 +26,7 @@ export async function createApp(opts: {
   localAccess?: boolean;
   publicBaseUrl?: string;
   disableRateLimit?: boolean;
+  push?: PushOptions;
   telegram?: TelegramOptions;
   instagram?: InstagramOptions;
   instagram2?: InstagramOptions;
@@ -32,6 +34,11 @@ export async function createApp(opts: {
   metaWebhook?: { verifyToken: string; appSecret: string };
 }) {
   const app = Fastify({ logger: false, bodyLimit: 65536 });
+  app.get("/sw.js", async (_req, reply) => reply
+    .header("Cache-Control", "no-store")
+    .header("Service-Worker-Allowed", "/")
+    .type("application/javascript")
+    .send(readFileSync(path.resolve("public/sw.js"), "utf8")));
   app.get("/privacy", async (_request, reply) =>
     reply
       .type("text/html; charset=utf-8")
@@ -55,6 +62,8 @@ export async function createApp(opts: {
     await app.register(rateLimit, { max: 2400, timeWindow: "1 minute" });
   const db = openDb(opts.dataDir, opts.mode),
     clients = new Set<ServerResponse>();
+  const push = new PushService(db, loadVapid(opts.dataDir, opts.push),
+    opts.push?.subject || (opts.publicBaseUrl?.startsWith("https:") ? opts.publicBaseUrl : "https://inbox.storebooks.uz"));
   // A process crash after provider submission is ambiguous: never blindly resend.
   db.transaction(() => {
     db.prepare(
@@ -71,8 +80,12 @@ export async function createApp(opts: {
       for (const c of clients) c.write("data: changed\n\n");
     }, 40);
   };
-  const store = new Store(db, publish, () => {
+  const store = new Store(db, publish, (event) => {
     for (const c of clients) c.write("event: incoming\ndata: new\n\n");
+    if (event) {
+      try { push.enqueue(event); }
+      catch { console.warn("Web Push enqueue failed"); }
+    }
   });
   const telegrams = new Map<string, TelegramIntegration>();
   if (opts.mode === "real" && opts.telegram) {
@@ -263,12 +276,16 @@ export async function createApp(opts: {
     },
   );
   app.post("/api/logout", async (req, reply) => {
+    db.prepare("DELETE FROM push_subscriptions WHERE session_hash=?").run(
+      hashToken(req.cookies.session ?? ""),
+    );
     db.prepare("DELETE FROM sessions WHERE token_hash=?").run(
       hashToken(req.cookies.session ?? ""),
     );
     reply.clearCookie("session", { path: "/" });
     return { ok: true };
   });
+  push.register(app);
   const accountQuery = (query: unknown) =>
     z
       .object({
@@ -813,7 +830,12 @@ export async function createApp(opts: {
     opts.worker === false
       ? undefined
       : setInterval(() => void store.tick(), 500);
+  const pushTimer = opts.worker === false ? undefined : setInterval(() => {
+    void push.flush().catch(() => console.warn("Web Push queue unavailable"));
+  }, 5000);
   app.addHook("preClose", async () => {
+    clearInterval(pushTimer);
+    await push.close();
     clearTimeout(publishTimer);
     inbox.close();
     clearInterval(timer);

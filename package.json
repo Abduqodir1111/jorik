@@ -30,6 +30,7 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "teleproto": "^1.232.0",
+    "web-push": "^4.0.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -38,6 +39,7 @@
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^6.1.2",
     "concurrently": "^10.0.6",
     "prettier": "^3.9.10",

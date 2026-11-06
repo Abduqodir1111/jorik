@@ -247,7 +247,7 @@ export class InstagramIntegration {
     if (peers.length !== 1) return;
     const peer = peers[0];
     const db = this.store.db;
-    let incoming = false;
+    let incoming: { conversationId: string; messageId: string } | undefined;
     db.transaction(() => {
       const existing = db
         .prepare(
@@ -348,7 +348,7 @@ export class InstagramIntegration {
           inserted.changes && notifyMessage && !out &&
           (!read || created.toISOString() > read.read_through) &&
           Math.abs(Date.now() - created.getTime()) < 60_000
-        ) incoming = true;
+        ) incoming = { conversationId: id, messageId: saved.id };
         if (inserted.changes && notifyMessage && !out && (!read || created.toISOString() > read.read_through))
           db.prepare("UPDATE conversations SET unread=unread+1 WHERE id=?").run(
             id,
@@ -362,7 +362,7 @@ export class InstagramIntegration {
       // Limit the boundary to this provider snapshot so newer webhooks survive.
       if (thread.unread_count === 0) this.markInboxRead(id, date.toISOString());
     })();
-    if (incoming) this.store.notifyIncoming();
+    if (incoming) this.store.notifyIncoming(incoming);
   }
   importRecent(recoverySince?: string) {
     if (this.archiveRunning) return this.archiveRunning;

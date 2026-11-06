@@ -1,4 +1,18 @@
 /* Apply the workspace reference to the live conversation components. */
+@media (max-width:767px) {
+  .inbox-page .list-footer,
+  .inbox-page .conversation-limit { display:none; }
+  .inbox-page .reply-account { display:none; }
+  .app.composer-focused {
+    --mobile-nav-height:0px;
+    position:fixed;
+    top:var(--chat-viewport-top, 0px);
+    left:0;
+    height:var(--chat-viewport-height, 100dvh);
+  }
+  .app.composer-focused .sidebar { display:none; }
+  .app.composer-focused > main { height:100%; min-height:0; }
+}
 .app .conversation-list { width:320px; min-width:280px; }
 .inbox-page .conversation { min-height:76px; padding:12px; }
 .conversation-avatar,.conversation-avatar .avatar { width:40px; height:40px; }

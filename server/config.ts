@@ -12,6 +12,11 @@ export const config = {
   mode: mode as Mode,
   localAccess: process.env.LOCAL_TEST_NO_PASSWORD === "true",
   disableRateLimit: process.env.LOCAL_TEST_NO_RATE_LIMIT === "true",
+  push: {
+    publicKey: process.env.VAPID_PUBLIC_KEY,
+    privateKey: process.env.VAPID_PRIVATE_KEY,
+    subject: process.env.VAPID_SUBJECT,
+  },
   telegram: {
     apiId: Number(process.env.TELEGRAM_API_ID ?? 0),
     apiHash: process.env.TELEGRAM_API_HASH ?? "",

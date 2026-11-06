@@ -3,6 +3,7 @@ import {
   reconcileInstagramMessage,
 } from "./instagram-message-key.js";
 import { randomUUID } from "node:crypto";
+import type { IncomingNotification } from "./push.js";
 import type { DB } from "./db.js";
 import type { Account, Conversation, Message } from "../shared/types.js";
 import {
@@ -16,7 +17,7 @@ export class Store {
   constructor(
     public db: DB,
     public changed: () => void = () => {},
-    public notifyIncoming: () => void = () => {},
+    public notifyIncoming: (event?: IncomingNotification) => void = () => {},
   ) {}
   resolveAdapter: (account: Account) => Adapter = adapterFor;
   accounts(): Account[] {
@@ -119,6 +120,7 @@ export class Store {
   incoming(accountId: string, event: IncomingEvent) {
     const a = this.account(accountId);
     const e = this.resolveAdapter(a).normalizeIncoming(event);
+    let notification: IncomingNotification | undefined;
     const result = this.db.transaction(() => {
       let c = this.db
         .prepare(
@@ -141,12 +143,14 @@ export class Store {
             now,
           );
       }
+      const messageId = randomUUID();
       const r = this.db
         .prepare(
           "INSERT OR IGNORE INTO messages(id,conversation_id,external_id,direction,text,status,created_at) VALUES(?,?,?,'in',?,'sent',?)",
         )
-        .run(randomUUID(), c.id, e.externalMessageId, e.text, now);
+        .run(messageId, c.id, e.externalMessageId, e.text, now);
       if (r.changes) {
+        notification = { conversationId: c.id, messageId };
         this.db
           .prepare(
             "UPDATE conversations SET unread=unread+1,updated_at=? WHERE id=?",
@@ -158,6 +162,7 @@ export class Store {
       }
       return c.id;
     })();
+    if (notification) this.notifyIncoming(notification);
     this.changed();
     return result;
   }

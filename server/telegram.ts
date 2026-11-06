@@ -673,13 +673,14 @@ export class TelegramIntegration {
           : "[Служебное сообщение]"),
       createdAt = new Date(m.date * 1000).toISOString();
     let insertedIncoming = false;
+    const messageId = randomUUID();
     this.store.db.transaction(() => {
       const r = this.store.db
         .prepare(
           "INSERT OR IGNORE INTO messages(id,conversation_id,external_id,direction,text,status,created_at) VALUES(?,?,?,?,?,'sent',?)",
         )
         .run(
-          randomUUID(),
+          messageId,
           c.id,
           String(m.id),
           m.out ? "out" : "in",
@@ -702,7 +703,7 @@ export class TelegramIntegration {
     // A native outgoing message handles earlier incoming IDs, never newer ones.
     if (m.out) this.markInboxRead(id, m.id - 1);
     if (insertedIncoming && Math.abs(Date.now() - m.date * 1000) < 60_000)
-      this.store.notifyIncoming();
+      this.store.notifyIncoming({ conversationId: c.id, messageId });
     if (mediaInfo) {
       const saved = this.store.db
         .prepare(

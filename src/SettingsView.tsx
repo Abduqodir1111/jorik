@@ -3,6 +3,7 @@ import { Check, LogOut, Volume2, Sun, Moon, Save, Server, Users, ChevronDown } f
 import { useOperator } from "./OperatorContext";
 import type { Mode } from "../shared/types";
 import "./settings-view.css";
+import { useWebPush } from "./useWebPush";
 
 type Props = {
   accountsContent: ReactNode;
@@ -31,6 +32,7 @@ export default function SettingsView({
   onSaveOwner,
   onLogout,
 }: Props) {
+  const push = useWebPush();
   const {
     fontSize,
     setFontSize,
@@ -102,6 +104,16 @@ export default function SettingsView({
           </button>
           <p>Управление подключениями Telegram и Instagram. Ответ отправляется через аккаунт, в который написал клиент.</p>
           {accountsExpanded && <div id="settings-account-connections">{accountsContent}</div>}
+        </section>
+        <section className="settings-card">
+          <h2>Push-уведомления</h2>
+          <p>Новые сообщения Telegram и Instagram, даже когда Jorik закрыт. Настройка действует для этого устройства.</p>
+          {push.hint ? <p>{push.hint}</p> : <button type="button" className="primary"
+            disabled={!push.ready || push.busy}
+            onClick={() => void (push.enabled ? push.disable() : push.enable())}>
+            {push.busy ? "Подождите…" : push.enabled ? "Отключить push-уведомления" : "Включить push-уведомления"}
+          </button>}
+          {push.status && <p role="status">{push.status}</p>}
         </section>
         <section className="settings-card preferences-card">
           <header>

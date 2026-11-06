@@ -19,6 +19,7 @@ __pycache__/
 .npmrc
 secrets/
 credentials/
+vapid.json
 *.pem
 *.key
 *.p12

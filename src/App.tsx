@@ -16,6 +16,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
 } from "react";
 import Avatar from "./Avatar";
 import ConversationRow from "./ConversationRow";
@@ -85,6 +86,28 @@ export default function App() {
   const [dismissed, setDismissed] = useState<Record<string, boolean>>({});
   const inputRef = useRef<HTMLTextAreaElement>(null),
     fileInput = useRef<HTMLInputElement>(null);
+  const [composerFocused, setComposerFocused] = useState(false);
+  const [composerViewport, setComposerViewport] = useState<{
+    height: number;
+    top: number;
+  }>();
+  useEffect(() => {
+    if (!composerFocused) return;
+    const viewport = window.visualViewport;
+    const update = () => setComposerViewport({
+      height: viewport?.height ?? window.innerHeight,
+      top: viewport?.offsetTop ?? 0,
+    });
+    update();
+    viewport?.addEventListener("resize", update);
+    viewport?.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    return () => {
+      viewport?.removeEventListener("resize", update);
+      viewport?.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [composerFocused]);
 
   const [auth, setAuth] = useState(false),
     [configured, setConfigured] = useState(true),
@@ -99,6 +122,12 @@ export default function App() {
     [messages, setMessages] = useState<Message[]>([]),
     [selected, setSelected] = useState<string | null>(null),
     [page, setPage] = useState("inbox");
+  useEffect(() => {
+    setComposerFocused(Boolean(
+      auth && page === "inbox" && selected &&
+      inputRef.current && document.activeElement === inputRef.current
+    ));
+  }, [auth, page, selected]);
   const [filter, setFilter] = useState("all"),
     [q, setQ] = useState(""),
     [searchIds, setSearchIds] = useState<string[]>([]),
@@ -185,6 +214,34 @@ export default function App() {
       historyRequests.current.delete(id);
     }
   }
+  useEffect(() => {
+    if (!auth) return;
+    const url = new URL(window.location.href);
+    const id = url.searchParams.get("conversation");
+    if (!id || !conversations.some(c => c.id === id)) return;
+    setPage("inbox");
+    setShowAllChats(true);
+    setFilter("all");
+    setUnread(false);
+    setQ("");
+    selectConversation(id);
+    url.searchParams.delete("conversation");
+    window.history.replaceState(null, "", url);
+  }, [auth, conversations, selectConversation]);
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const open = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin ||
+          event.data?.type !== "OPEN_CONVERSATION" ||
+          typeof event.data.conversationId !== "string") return;
+      const url = new URL(window.location.href);
+      url.searchParams.set("conversation", event.data.conversationId);
+      window.history.replaceState(null, "", url);
+      if (auth) void refresh().catch(report);
+    };
+    navigator.serviceWorker.addEventListener("message", open);
+    return () => navigator.serviceWorker.removeEventListener("message", open);
+  }, [auth]);
   useEffect(() => {
     api("/auth-status")
       .then((s) => {
@@ -671,7 +728,11 @@ export default function App() {
     );
   return (
     <div
-      className={`app ${orderPanelOpen ? "has-order-panel" : ""} ${page === "inbox" ? "inbox-page" : ""} ${page === "inbox" && selected && chatExpanded ? "chat-expanded" : ""}`}
+      className={`app ${orderPanelOpen ? "has-order-panel" : ""} ${page === "inbox" ? "inbox-page" : ""} ${page === "inbox" && selected && chatExpanded ? "chat-expanded" : ""} ${composerFocused && page === "inbox" && selected ? "composer-focused" : ""}`}
+      style={composerFocused && composerViewport ? {
+        "--chat-viewport-height": `${composerViewport.height}px`,
+        "--chat-viewport-top": `${composerViewport.top}px`,
+      } as CSSProperties : undefined}
     >
       <aside
         className="sidebar bg-slate-900 dark:bg-black text-slate-400"
@@ -1070,6 +1131,8 @@ export default function App() {
                       placeholder="Напишите сообщение…"
                       value={drafts[c.id] ?? ""}
                       disabled={sending}
+                      onFocus={() => setComposerFocused(true)}
+                      onBlur={() => setComposerFocused(false)}
                       onChange={(e) => {
                         draft(e.target.value);
                         if (e.target.value === "/") {
