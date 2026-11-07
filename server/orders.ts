@@ -95,6 +95,37 @@ export function registerOrders(app: FastifyInstance, store: Store) {
             .all()
     ).map((r) => decode(r as Row));
   });
+  app.get("/api/orders/export", async (req, reply) => {
+    const filter = z
+      .object({
+        startDate: date,
+        endDate: date,
+        source: z.enum(["ALL", "STOREBOOKS", "MANGASTORE"]).default("ALL"),
+      })
+      .strict()
+      .refine((f) => f.startDate <= f.endDate, "Начало периода позже окончания")
+      .parse(req.query);
+    const params: string[] = [filter.startDate, filter.endDate];
+    const source =
+      filter.source === "ALL"
+        ? ""
+        : " AND upper(trim(json_extract(data,'$.source')))=?";
+    if (source) params.push(filter.source);
+    const rows = db
+      .prepare(
+        "SELECT * FROM orders WHERE date>=? AND date<=? AND refused=0 AND json_extract(data,'$.deliveryType') IN ('delivery','mail')" +
+          source +
+          " ORDER BY date DESC,created_at DESC LIMIT 10001",
+      )
+      .all(...params) as Row[];
+    if (rows.length > 10000)
+      return reply
+        .code(400)
+        .send({
+          error: "В отчёте больше 10 000 заказов. Выберите меньший период.",
+        });
+    return rows.map(decode);
+  });
   app.post("/api/orders", async (req, reply) => {
     const o = validate(req.body),
       id = randomUUID(),
@@ -102,7 +133,7 @@ export function registerOrders(app: FastifyInstance, store: Store) {
     db.prepare(
       "INSERT INTO orders(id,date,phone,data,created_at,updated_at) VALUES(?,?,?,?,?,?)",
     ).run(id, o.date, o.phone, JSON.stringify(o), now, now);
-    store.changed();
+    store.ordersChanged();
     reply.code(201);
     return get(id);
   });
@@ -117,7 +148,7 @@ export function registerOrders(app: FastifyInstance, store: Store) {
       new Date().toISOString(),
       req.params.id,
     );
-    store.changed();
+    store.ordersChanged();
     return get(req.params.id);
   });
   app.patch<{ Params: { id: string } }>(
@@ -133,14 +164,14 @@ export function registerOrders(app: FastifyInstance, store: Store) {
         new Date().toISOString(),
         req.params.id,
       );
-      store.changed();
+      store.ordersChanged();
       return get(req.params.id);
     },
   );
   app.delete<{ Params: { id: string } }>("/api/orders/:id", async (req) => {
     get(req.params.id);
     db.prepare("DELETE FROM orders WHERE id=?").run(req.params.id);
-    store.changed();
+    store.ordersChanged();
     return { ok: true };
   });
 }

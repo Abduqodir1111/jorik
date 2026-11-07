@@ -65,7 +65,11 @@ export class InstagramIntegration {
     error?: string;
   } = { state: "idle", imported: 0 };
   recoveryStatus() {
-    return {attempt:this.recoveryFailures,nextAttemptAt:this.nextRecoveryAt,requiresLogin:this.authBlocked};
+    return {
+      attempt: this.recoveryFailures,
+      nextAttemptAt: this.nextRecoveryAt,
+      requiresLogin: this.authBlocked,
+    };
   }
   recentImportStatus() {
     return { ...this.archiveStatus };
@@ -86,12 +90,26 @@ export class InstagramIntegration {
         .prepare(
           "SELECT m.id,m.external_id,m.conversation_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE c.account_id=? AND m.external_id IS NOT NULL AND m.instagram_key IS NULL",
         )
-        .all(this.accountId) as { id: string; external_id: string; conversation_id: string }[];
+        .all(this.accountId) as {
+        id: string;
+        external_id: string;
+        conversation_id: string;
+      }[];
       const update = store.db.prepare(
         "UPDATE OR IGNORE messages SET instagram_key=? WHERE id=?",
       );
       for (const row of rows) {
-        if(store.db.prepare("SELECT 1 FROM outbox WHERE message_id=?").get(row.id)) reconcileInstagramMessage(store.db,row.id,row.conversation_id,row.external_id);
+        if (
+          store.db
+            .prepare("SELECT 1 FROM outbox WHERE message_id=?")
+            .get(row.id)
+        )
+          reconcileInstagramMessage(
+            store.db,
+            row.id,
+            row.conversation_id,
+            row.external_id,
+          );
         else update.run(instagramMessageKey(row.external_id), row.id);
       }
     })();
@@ -295,7 +313,9 @@ export class InstagramIntegration {
           continue;
         const out = m.from.id === this.igId || m.from.id === this.pageId;
         if (!out && m.from.id !== peer.id) continue;
-        const notifyMessage = notify && (!notifySince || created.getTime() >= Date.parse(notifySince));
+        const notifyMessage =
+          notify &&
+          (!notifySince || created.getTime() >= Date.parse(notifySince));
         const key = instagramMessageKey(m.id);
         const previous = db
           .prepare(
@@ -327,8 +347,14 @@ export class InstagramIntegration {
         db.prepare(
           "UPDATE OR IGNORE messages SET instagram_key=? WHERE id=?",
         ).run(key, saved.id);
-        if (typeof m.reply_to?.mid === "string" && m.reply_to.mid && m.reply_to.mid !== m.id) {
-          db.prepare("UPDATE messages SET reply_to_external_id=? WHERE id=?").run(m.reply_to.mid, saved.id);
+        if (
+          typeof m.reply_to?.mid === "string" &&
+          m.reply_to.mid &&
+          m.reply_to.mid !== m.id
+        ) {
+          db.prepare(
+            "UPDATE messages SET reply_to_external_id=? WHERE id=?",
+          ).run(m.reply_to.mid, saved.id);
         }
         const media = instagramAttachments(m.attachments?.data, saved.id);
         if (m.attachments) {
@@ -336,25 +362,43 @@ export class InstagramIntegration {
             JSON.stringify(media),
             m.message ||
               (media.length
-                ? media.some((a) => a.kind === "video")
-                  ? "Видео"
-                  : "Фотография"
+                ? media.some((a) => a.kind === "location")
+                  ? "Геолокация"
+                  : media.some((a) => a.kind === "voice")
+                    ? "Голосовое сообщение"
+                    : media.some((a) => a.kind === "video")
+                      ? "Видео"
+                      : "Фотография"
                 : "[Вложение Instagram недоступно — откройте в Instagram]"),
             saved.id,
           );
         }
-        const read = db.prepare("SELECT read_through FROM instagram_inbox_reads WHERE conversation_id=?").get(id) as { read_through: string } | undefined;
+        const read = db
+          .prepare(
+            "SELECT read_through FROM instagram_inbox_reads WHERE conversation_id=?",
+          )
+          .get(id) as { read_through: string } | undefined;
         if (
-          inserted.changes && notifyMessage && !out &&
+          inserted.changes &&
+          notifyMessage &&
+          !out &&
           (!read || created.toISOString() > read.read_through) &&
           Math.abs(Date.now() - created.getTime()) < 60_000
-        ) incoming = { conversationId: id, messageId: saved.id };
-        if (inserted.changes && notifyMessage && !out && (!read || created.toISOString() > read.read_through))
+        )
+          incoming = { conversationId: id, messageId: saved.id };
+        if (
+          inserted.changes &&
+          notifyMessage &&
+          !out &&
+          (!read || created.toISOString() > read.read_through)
+        )
           db.prepare("UPDATE conversations SET unread=unread+1 WHERE id=?").run(
             id,
           );
         if (out) {
-          const confirmed = db.prepare("SELECT created_at FROM messages WHERE id=?").get(saved.id) as { created_at: string };
+          const confirmed = db
+            .prepare("SELECT created_at FROM messages WHERE id=?")
+            .get(saved.id) as { created_at: string };
           this.markInboxRead(id, confirmed.created_at);
         }
       }
@@ -407,13 +451,17 @@ export class InstagramIntegration {
       if (!Array.isArray(result.data))
         throw new Error("Meta не вернула список диалогов.");
       scanned += result.data.length;
-      const items = (result.data as Thread[]).filter(item => !recoverySince || Date.parse(item.updated_time) >= Date.parse(recoverySince));
+      const items = (result.data as Thread[]).filter(
+        (item) =>
+          !recoverySince ||
+          Date.parse(item.updated_time) >= Date.parse(recoverySince),
+      );
       if (recoverySince && !items.length) break;
       for (let offset = 0; offset < items.length && !this.closed; offset += 3) {
         const outcomes = await Promise.allSettled(
           items.slice(offset, offset + 3).map(async (item) => {
             const detail = await this.request(
-              `${encodeURIComponent(item.id)}?fields=${encodeURIComponent((recoverySince ? fields : fields.replace("messages.limit(30)", "messages.limit(1)")))}`,
+              `${encodeURIComponent(item.id)}?fields=${encodeURIComponent(recoverySince ? fields : fields.replace("messages.limit(30)", "messages.limit(1)"))}`,
             );
             this.importThread(detail, !!recoverySince, recoverySince);
             const saved = this.store.db
@@ -441,49 +489,85 @@ export class InstagramIntegration {
   sync() {
     if (this.closed) return Promise.resolve();
     if (this.running) return this.running;
-    this.running = this.performSync().then(() => {
-      if (this.closed) return;
-      this.authBlocked = false;
-      if (this.started && this.opts.receiveMode === "webhook") {
-        if (this.recoveryFailures) logRecovery(this.accountId,"connected",this.recoveryFailures);
-        this.recoveryFailures = 0;
-        this.scheduleCheck(60000);
-        const since = this.catchupSince || this.recoverySince;
-        this.recoverySince = undefined;
-        if (since && this.archiveRunning) this.catchupSince = since;
-        if (since && !this.archiveRunning) {
-          this.catchupSince = undefined;
-          this.catchupAttempts++;
-          void this.importRecent(since).catch(error => {
-            if (this.closed) return;
-            logRecovery(this.accountId,"catchup_failed",this.catchupAttempts,error);
-            const code = (error as {graphCode?:number}).graphCode;
-            if (this.catchupAttempts < 3 && (code === undefined || [1,-2,4,17,32,613].includes(code))) this.catchupSince = since;
-          });
-        }
-      }
-    }, error => {
-      if (!this.closed && this.started && this.opts.receiveMode === "webhook") {
-        this.recoveryFailures++;
-        this.recoverySince ??= this.recoveryBoundary();
-        this.catchupAttempts = 0;
-        const code = (error as {graphCode?:number}).graphCode;
-        if ([190,10,200].includes(code ?? 0)) {
-          this.authBlocked = true;
-          this.nextRecoveryAt = null;
-          clearTimeout(this.timer);
-          this.state("unconfigured", "Токен или разрешения Instagram недействительны. Обновите подключение в настройках.");
-          logRecovery(this.accountId,"requires_login",this.recoveryFailures,error);
-        } else {
-          const delay = recoveryDelay(this.recoveryFailures,this.cooldown-Date.now());
-          this.scheduleCheck(delay);
-          logRecovery(this.accountId,"retry",this.recoveryFailures,error,delay);
-        }
-      }
-      throw error;
-    }).finally(() => {
-      this.running = undefined;
-    });
+    this.running = this.performSync()
+      .then(
+        () => {
+          if (this.closed) return;
+          this.authBlocked = false;
+          if (this.started && this.opts.receiveMode === "webhook") {
+            if (this.recoveryFailures)
+              logRecovery(this.accountId, "connected", this.recoveryFailures);
+            this.recoveryFailures = 0;
+            this.scheduleCheck(60000);
+            const since = this.catchupSince || this.recoverySince;
+            this.recoverySince = undefined;
+            if (since && this.archiveRunning) this.catchupSince = since;
+            if (since && !this.archiveRunning) {
+              this.catchupSince = undefined;
+              this.catchupAttempts++;
+              void this.importRecent(since).catch((error) => {
+                if (this.closed) return;
+                logRecovery(
+                  this.accountId,
+                  "catchup_failed",
+                  this.catchupAttempts,
+                  error,
+                );
+                const code = (error as { graphCode?: number }).graphCode;
+                if (
+                  this.catchupAttempts < 3 &&
+                  (code === undefined || [1, -2, 4, 17, 32, 613].includes(code))
+                )
+                  this.catchupSince = since;
+              });
+            }
+          }
+        },
+        (error) => {
+          if (
+            !this.closed &&
+            this.started &&
+            this.opts.receiveMode === "webhook"
+          ) {
+            this.recoveryFailures++;
+            this.recoverySince ??= this.recoveryBoundary();
+            this.catchupAttempts = 0;
+            const code = (error as { graphCode?: number }).graphCode;
+            if ([190, 10, 200].includes(code ?? 0)) {
+              this.authBlocked = true;
+              this.nextRecoveryAt = null;
+              clearTimeout(this.timer);
+              this.state(
+                "unconfigured",
+                "Токен или разрешения Instagram недействительны. Обновите подключение в настройках.",
+              );
+              logRecovery(
+                this.accountId,
+                "requires_login",
+                this.recoveryFailures,
+                error,
+              );
+            } else {
+              const delay = recoveryDelay(
+                this.recoveryFailures,
+                this.cooldown - Date.now(),
+              );
+              this.scheduleCheck(delay);
+              logRecovery(
+                this.accountId,
+                "retry",
+                this.recoveryFailures,
+                error,
+                delay,
+              );
+            }
+          }
+          throw error;
+        },
+      )
+      .finally(() => {
+        this.running = undefined;
+      });
     return this.running;
   }
   private async performSync() {
@@ -581,24 +665,52 @@ export class InstagramIntegration {
   }
   private markInboxRead(id: string, through: string) {
     const db = this.store.db;
-    db.prepare("INSERT INTO instagram_inbox_reads(conversation_id,read_through) VALUES(?,?) ON CONFLICT(conversation_id) DO UPDATE SET read_through=MAX(read_through,excluded.read_through)").run(id, through);
-    db.prepare(`UPDATE conversations SET unread=MIN(unread, (SELECT COUNT(*) FROM messages
-      WHERE conversation_id=? AND direction='in' AND created_at>(SELECT read_through FROM instagram_inbox_reads WHERE conversation_id=?))) WHERE id=?`).run(id, id, id);
+    db.prepare(
+      "INSERT INTO instagram_inbox_reads(conversation_id,read_through) VALUES(?,?) ON CONFLICT(conversation_id) DO UPDATE SET read_through=MAX(read_through,excluded.read_through)",
+    ).run(id, through);
+    db.prepare(
+      `UPDATE conversations SET unread=MIN(unread, (SELECT COUNT(*) FROM messages
+      WHERE conversation_id=? AND direction='in' AND created_at>(SELECT read_through FROM instagram_inbox_reads WHERE conversation_id=?))) WHERE id=?`,
+    ).run(id, id, id);
   }
-  private receiveRead(event: any, identity: { ig_id: string; page_id: string }) {
-    const sender = event?.sender?.id, recipient = event?.recipient?.id;
-    if (typeof sender !== "string" || typeof recipient !== "string") return false;
-    const own = (id: string) => id === identity.ig_id || id === identity.page_id;
+  private receiveRead(
+    event: any,
+    identity: { ig_id: string; page_id: string },
+  ) {
+    const sender = event?.sender?.id,
+      recipient = event?.recipient?.id;
+    if (typeof sender !== "string" || typeof recipient !== "string")
+      return false;
+    const own = (id: string) =>
+      id === identity.ig_id || id === identity.page_id;
     if (own(sender) === own(recipient)) return false;
-    const inbox = own(sender), peer = inbox ? recipient : sender;
-    const row = this.store.db.prepare("SELECT c.id FROM conversations c JOIN instagram_threads t ON t.conversation_id=c.id WHERE c.account_id=? AND t.recipient_id=?").get(this.accountId, peer) as { id: string } | undefined;
+    const inbox = own(sender),
+      peer = inbox ? recipient : sender;
+    const row = this.store.db
+      .prepare(
+        "SELECT c.id FROM conversations c JOIN instagram_threads t ON t.conversation_id=c.id WHERE c.account_id=? AND t.recipient_id=?",
+      )
+      .get(this.accountId, peer) as { id: string } | undefined;
     if (!row) return false;
     const read = event.read;
     let through: string | undefined;
     if (typeof read?.mid === "string") {
-      const m = this.store.db.prepare("SELECT created_at FROM messages WHERE conversation_id=? AND direction=? AND (external_id=? OR instagram_key=?) AND status='sent'").get(row.id, inbox ? "in" : "out", read.mid, instagramMessageKey(read.mid)) as { created_at: string } | undefined;
+      const m = this.store.db
+        .prepare(
+          "SELECT created_at FROM messages WHERE conversation_id=? AND direction=? AND (external_id=? OR instagram_key=?) AND status='sent'",
+        )
+        .get(
+          row.id,
+          inbox ? "in" : "out",
+          read.mid,
+          instagramMessageKey(read.mid),
+        ) as { created_at: string } | undefined;
       through = m?.created_at;
-    } else if (Number.isFinite(read?.watermark) && read.watermark > 0 && read.watermark <= Date.now() + 60_000) {
+    } else if (
+      Number.isFinite(read?.watermark) &&
+      read.watermark > 0 &&
+      read.watermark <= Date.now() + 60_000
+    ) {
       through = new Date(read.watermark).toISOString();
     }
     if (!through) return false;
@@ -606,7 +718,11 @@ export class InstagramIntegration {
     else {
       // A customer reading our reply does not acknowledge their incoming messages.
       const seen = new Date().toISOString();
-      this.store.db.prepare("UPDATE messages SET read_at=? WHERE conversation_id=? AND direction='out' AND status='sent' AND created_at<=? AND read_at IS NULL").run(seen, row.id, through);
+      this.store.db
+        .prepare(
+          "UPDATE messages SET read_at=? WHERE conversation_id=? AND direction='out' AND status='sent' AND created_at<=? AND read_at IS NULL",
+        )
+        .run(seen, row.id, through);
     }
     return true;
   }
@@ -634,7 +750,13 @@ export class InstagramIntegration {
       ...(Array.isArray(entry.changes)
         ? entry.changes
             .filter((change: any) =>
-              ["messages", "standby", "messaging_seen", "message_reads", "message_echoes"].includes(change?.field),
+              [
+                "messages",
+                "standby",
+                "messaging_seen",
+                "message_reads",
+                "message_echoes",
+              ].includes(change?.field),
             )
             .map((change: any) => ({
               event: change.value,
@@ -697,13 +819,26 @@ export class InstagramIntegration {
                 from: { id: out ? identity.ig_id : peer },
                 message:
                   typeof message.text === "string" ? message.text : undefined,
-                reply_to: typeof message.reply_to?.mid === "string" ? {mid:message.reply_to.mid} : undefined,
+                reply_to:
+                  typeof message.reply_to?.mid === "string"
+                    ? { mid: message.reply_to.mid }
+                    : undefined,
                 attachments: Array.isArray(message.attachments)
                   ? {
                       data: message.attachments.map((a: any) =>
-                        a.type === "video"
-                          ? { video_data: { url: a.payload?.url } }
-                          : { image_data: { url: a.payload?.url } },
+                        a.type === "location"
+                          ? {
+                              location_data: {
+                                latitude: a.payload?.coordinates?.lat,
+                                longitude: a.payload?.coordinates?.long,
+                                name: a.title,
+                              },
+                            }
+                          : a.type === "audio" || a.type === "voice_media"
+                            ? { audio_data: { url: a.payload?.url } }
+                            : a.type === "video"
+                              ? { video_data: { url: a.payload?.url } }
+                              : { image_data: { url: a.payload?.url } },
                       ),
                     }
                   : undefined,
@@ -739,23 +874,30 @@ export class InstagramIntegration {
           .prepare(
             "UPDATE accounts SET state=CASE WHEN ? THEN state ELSE 'connected' END,error=CASE WHEN ? THEN error ELSE NULL END,last_sync=? WHERE id=?",
           )
-          .run(this.authBlocked ? 1 : 0, this.authBlocked ? 1 : 0, new Date().toISOString(), this.accountId);
+          .run(
+            this.authBlocked ? 1 : 0,
+            this.authBlocked ? 1 : 0,
+            new Date().toISOString(),
+            this.accountId,
+          );
       this.store.changed();
     }
     return handled;
   }
   private recoveryBoundary() {
     const last = this.store.account(this.accountId).lastSync;
-    return last && Number.isFinite(Date.parse(last)) ? new Date(Date.parse(last)-2000).toISOString() : undefined;
+    return last && Number.isFinite(Date.parse(last))
+      ? new Date(Date.parse(last) - 2000).toISOString()
+      : undefined;
   }
   private scheduleCheck(delay: number) {
     clearTimeout(this.timer);
     if (this.closed || this.authBlocked) return;
-    this.nextRecoveryAt = Date.now()+delay;
+    this.nextRecoveryAt = Date.now() + delay;
     this.timer = setTimeout(() => {
       this.nextRecoveryAt = null;
       void this.sync().catch(() => {});
-    },delay);
+    }, delay);
     this.timer.unref?.();
   }
   start() {
@@ -763,7 +905,8 @@ export class InstagramIntegration {
     this.started = true;
     if (this.opts.receiveMode === "webhook") {
       const last = this.store.account(this.accountId).lastSync;
-      if (last && Date.now()-Date.parse(last)>60000) this.recoverySince = this.recoveryBoundary();
+      if (last && Date.now() - Date.parse(last) > 60000)
+        this.recoverySince = this.recoveryBoundary();
       void this.sync().catch(() => {});
       return;
     }
@@ -852,9 +995,20 @@ export class InstagramIntegration {
     }
     const mime = response.headers.get("content-type")?.split(";")[0] ?? "";
     if (
-      !(item.kind === "image"
-        ? ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(mime)
-        : ["video/mp4", "video/webm", "video/quicktime"].includes(mime))
+      !(item.kind === "voice"
+        ? [
+            "audio/mp4",
+            "audio/m4a",
+            "audio/x-m4a",
+            "audio/aac",
+            "audio/mpeg",
+            "audio/ogg",
+          ].includes(mime)
+        : item.kind === "image"
+          ? ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(
+              mime,
+            )
+          : ["video/mp4", "video/webm", "video/quicktime"].includes(mime))
     ) {
       await response.body.cancel();
       throw new Error("Формат вложения не поддерживается.");

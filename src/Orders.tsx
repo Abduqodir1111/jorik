@@ -1,17 +1,27 @@
+import DayAccordion from "./DayAccordion";
+import PreviewModal from "./PreviewModal";
+import AdvancedExportModal from "./AdvancedExportModal";
+import {
+  generateDeliveryWorksheet,
+  type DeliveryFilter,
+  type DeliveryWorksheet,
+} from "../shared/delivery-export";
 import CompactOrderForm from "./CompactOrderForm";
 import { customerOrderHistory } from "../shared/order-form";
 import OrderCard from "./OrderCard";
 import { coalesceAsync } from "./refresh-queue";
-import { useEffect, useRef, useState } from "react";
-import { Plus, X, Download, Package } from "lucide-react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import {
-  localDate,
-  courierRows,
-  type Order,
-  type OrderInput,
-} from "../shared/orders";
+  Plus,
+  X,
+  Download,
+  Package,
+  Eye,
+  SlidersHorizontal,
+} from "lucide-react";
+import { localDate, type Order, type OrderInput } from "../shared/orders";
 import type { Account, Conversation } from "../shared/types";
-import { exportToExcel } from "./orders-export";
+import { exportToExcel, downloadDelivery } from "./orders-export";
 async function request<T>(
   route: string,
   method = "GET",
@@ -87,6 +97,14 @@ export default function Orders({
     [form, setForm] = useState<OrderInput | null>(null),
     [editing, setEditing] = useState<Order | null>(null);
   const [formContext, setFormContext] = useState<OrderContext | undefined>();
+  const [dayOpen, setDayOpen] = useState<Record<string, boolean>>({});
+  const [preview, setPreview] = useState<{
+    sheet: DeliveryWorksheet;
+    filter: DeliveryFilter;
+  } | null>(null);
+  const [advanced, setAdvanced] = useState(false);
+  const [exportDay, setExportDay] = useState<string | null>(null);
+  const exportLock = useRef(false);
   const [ordersLoaded, setOrdersLoaded] = useState(false);
   const autoPhone = useRef(false);
   const [amount, setAmount] = useState(""),
@@ -95,14 +113,17 @@ export default function Orders({
     [history, setHistory] = useState(false);
   const historyDialog = useRef<HTMLDialogElement>(null),
     currentRequest = useRef(0);
-  async function load() {
+  const load = useCallback(async () => {
     try {
-      setOrders(await request<Order[]>(""));
+      const data = await request<Order[]>("");
+      setOrders((old) =>
+        JSON.stringify(old) === JSON.stringify(data) ? old : data,
+      );
       setOrdersLoaded(true);
     } catch (e) {
       setError((e as Error).message);
     }
-  }
+  }, []);
   useEffect(() => {
     if (!visible && !form) return;
     let active = true;
@@ -110,32 +131,35 @@ export default function Orders({
       if (active) await load();
     });
     void update();
-    const events = new EventSource("/api/events");
-    events.onmessage = () => void update();
+    const changed = () => void update();
+    window.addEventListener("jorik:orders-changed", changed);
     return () => {
       active = false;
-      events.close();
+      window.removeEventListener("jorik:orders-changed", changed);
     };
-  }, [visible, !!form]);
-  function open(order?: Order, ctx?: OrderContext) {
-    if (form) return;
-    autoPhone.current = false;
-    const linked = order?.conversationId
-      ? conversations.find((c) => c.id === order.conversationId)
-      : undefined;
-    const account = linked
-      ? accounts.find((a) => a.id === linked.accountId)
-      : undefined;
-    setFormContext(
-      ctx ??
-        (linked && account ? { conversation: linked, account } : undefined),
-    );
-    setEditing(order ?? null);
-    setForm(order ? { ...order } : blank(ctx));
-    setAmount(order ? String(order.amount) : "");
-    setError("");
-    setHistory(false);
-  }
+  }, [visible, !!form, load]);
+  const open = useCallback(
+    (order?: Order, ctx?: OrderContext) => {
+      if (form) return;
+      autoPhone.current = false;
+      const linked = order?.conversationId
+        ? conversations.find((c) => c.id === order.conversationId)
+        : undefined;
+      const account = linked
+        ? accounts.find((a) => a.id === linked.accountId)
+        : undefined;
+      setFormContext(
+        ctx ??
+          (linked && account ? { conversation: linked, account } : undefined),
+      );
+      setEditing(order ?? null);
+      setForm(order ? { ...order } : blank(ctx));
+      setAmount(order ? String(order.amount) : "");
+      setError("");
+      setHistory(false);
+    },
+    [!!form, conversations, accounts],
+  );
   useEffect(() => {
     if (openRequest && openRequest !== currentRequest.current) {
       currentRequest.current = openRequest;
@@ -149,7 +173,9 @@ export default function Orders({
     if (history) historyDialog.current?.showModal();
     else historyDialog.current?.close();
   }, [history]);
-  useEffect(()=>{if(closeRequest)close();},[closeRequest]);
+  useEffect(() => {
+    if (closeRequest) close();
+  }, [closeRequest]);
   function close() {
     setForm(null);
     setHistory(false);
@@ -169,10 +195,9 @@ export default function Orders({
           : f,
       );
   }, [form?.conversationId, editing, ordersLoaded, orders]);
-  const phoneHistory = customerOrderHistory(
-    orders,
-    form?.phone ?? "",
-    editing?.id,
+  const phoneHistory = useMemo(
+    () => customerOrderHistory(orders, form?.phone ?? "", editing?.id),
+    [orders, form?.phone, editing?.id],
   );
   const valid =
     !!form &&
@@ -230,30 +255,68 @@ export default function Orders({
       setBusy(false);
     }
   }
-  async function modify(o: Order, kind: "delete" | "refuse") {
-    if (busy) return;
-    if (
-      kind === "delete" &&
-      !window.confirm(
-        "Удалить заказ безвозвратно? Это действие нельзя отменить.",
+  const modify = useCallback(
+    async (o: Order, kind: "delete" | "refuse") => {
+      if (busy) return;
+      if (
+        kind === "delete" &&
+        !window.confirm(
+          "Удалить заказ безвозвратно? Это действие нельзя отменить.",
+        )
       )
-    )
-      return;
-    setBusy(true);
+        return;
+      setBusy(true);
+      try {
+        await request(
+          "/" + o.id + (kind === "refuse" ? "/refused" : ""),
+          kind === "delete" ? "DELETE" : "PATCH",
+          kind === "refuse" ? { refused: !o.refused } : undefined,
+        );
+        await load();
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, load],
+  );
+  const refuseOrder = useCallback(
+    (order: Order) => void modify(order, "refuse"),
+    [modify],
+  );
+  const deleteOrder = useCallback(
+    (order: Order) => void modify(order, "delete"),
+    [modify],
+  );
+  const groups = useMemo(() => {
+    const map = new Map<string, Order[]>();
+    for (const order of orders) {
+      const list = map.get(order.date) || [];
+      list.push(order);
+      map.set(order.date, list);
+    }
+    return [...map]
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([day, items]) => ({
+        day,
+        items,
+        sheet: generateDeliveryWorksheet(items),
+      }));
+  }, [orders]);
+  async function exportDayFile(day: string) {
+    if (exportLock.current) return;
+    exportLock.current = true;
+    setExportDay(day);
     try {
-      await request(
-        "/" + o.id + (kind === "refuse" ? "/refused" : ""),
-        kind === "delete" ? "DELETE" : "PATCH",
-        kind === "refuse" ? { refused: !o.refused } : undefined,
-      );
-      await load();
+      await exportToExcel(orders, day);
     } catch (e) {
-      setError((e as Error).message);
+      setError(e instanceof Error ? e.message : "Ошибка экспорта");
     } finally {
-      setBusy(false);
+      exportLock.current = false;
+      setExportDay(null);
     }
   }
-  const dates = [...new Set(orders.map((o) => o.date))].sort().reverse();
   return (
     <>
       {visible && (
@@ -266,10 +329,16 @@ export default function Orders({
               </h1>
               <p>Доставка, самовывоз и почта · Storebooks и Mangastore</p>
             </div>
-            <button className="primary" onClick={() => open()}>
-              <Plus size={18} />
-              Заказ
-            </button>
+            <div className="orders-heading-actions">
+              <button onClick={() => setAdvanced(true)}>
+                <SlidersHorizontal size={16} />
+                Расширенный экспорт
+              </button>
+              <button className="primary" onClick={() => open()}>
+                <Plus size={18} />
+                Заказ
+              </button>
+            </div>
           </header>
           {error && !form && (
             <p role="alert" className="orders-error">
@@ -283,34 +352,81 @@ export default function Orders({
               <p>Оформите заказ из чата или добавьте его вручную.</p>
             </div>
           )}
-          {dates.map((day) => (
-            <section className="order-group" key={day}>
-              <header>
-                <h2>{groupTitle(day)}</h2>
-                <button
-                  aria-label="Скачать Excel для курьера"
-                  title="Скачать Excel для курьера"
-                  disabled={!courierRows(orders, day).length}
-                  onClick={() =>
-                    void exportToExcel(orders, day).catch((e) =>
-                      setError(e.message),
-                    )
-                  }
-                >
-                  <Download size={16} />
-                  Excel
-                </button>
-              </header>
-              <div className="orders-grid" role="list" aria-label={`Заказы на ${groupTitle(day)}`}>
-                {orders.filter(o => o.date === day).map(o => (
-                  <OrderCard key={o.id} order={o} busy={busy} onEdit={open}
-                    onRefuse={order => void modify(order, "refuse")}
-                    onDelete={order => void modify(order, "delete")} />
+          {groups.map(({ day, items, sheet }, index) => (
+            <DayAccordion
+              key={day}
+              title={groupTitle(day)}
+              count={items.length}
+              open={dayOpen[day] ?? index < 3}
+              onToggle={() =>
+                setDayOpen((old) => ({
+                  ...old,
+                  [day]: !(old[day] ?? index < 3),
+                }))
+              }
+              actions={
+                <>
+                  <button
+                    aria-label={`Предпросмотр доставок ${day}`}
+                    disabled={!sheet.rows.length}
+                    onClick={() =>
+                      setPreview({
+                        sheet,
+                        filter: { startDate: day, endDate: day, source: "ALL" },
+                      })
+                    }
+                  >
+                    <Eye size={16} />
+                    Предпросмотр
+                  </button>
+                  <button
+                    aria-label={`Скачать Excel для курьера ${day}`}
+                    disabled={!sheet.rows.length || exportDay !== null}
+                    onClick={() => void exportDayFile(day)}
+                  >
+                    <Download size={16} />
+                    {exportDay === day ? "Подготовка…" : "Excel"}
+                  </button>
+                </>
+              }
+            >
+              <div
+                className="orders-grid"
+                role="list"
+                aria-label={`Заказы на ${groupTitle(day)}`}
+              >
+                {items.map((o) => (
+                  <OrderCard
+                    key={o.id}
+                    order={o}
+                    busy={busy}
+                    onEdit={open}
+                    onRefuse={refuseOrder}
+                    onDelete={deleteOrder}
+                  />
                 ))}
               </div>
-            </section>
+            </DayAccordion>
           ))}
         </section>
+      )}
+      {advanced && (
+        <AdvancedExportModal
+          onClose={() => setAdvanced(false)}
+          onResult={async (data, filter) => {
+            const sheet = generateDeliveryWorksheet(data, filter);
+            if (sheet.rows.length) await downloadDelivery(sheet, filter);
+            setAdvanced(false);
+            setPreview({ sheet, filter });
+          }}
+        />
+      )}
+      {preview && (
+        <PreviewModal
+          sheet={preview.sheet}
+          filter={preview.filter}
+          onClose={() => setPreview(null)}
+        />
       )}
       {form && (
         <aside
@@ -361,7 +477,11 @@ export default function Orders({
             <small>
               {o.amount.toLocaleString("ru-RU")} сум ·{" "}
               {o.refused ? "Отказ" : o.isPaid ? "Оплачено" : "Не оплачено"} ·{" "}
-              {o.deliveryType === "pickup" ? "Самовывоз" : o.deliveryType === "mail" ? "Почта" : o.district}
+              {o.deliveryType === "pickup"
+                ? "Самовывоз"
+                : o.deliveryType === "mail"
+                  ? "Почта"
+                  : o.district}
             </small>
           </article>
         ))}

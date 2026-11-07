@@ -1,5 +1,9 @@
 import type { Attachment } from "../shared/types.js";
 export type InstagramMedia = {
+  location_data?: { latitude?: number; longitude?: number; name?: string };
+  mime_type?: string;
+  file_url?: string;
+  audio_data?: { url?: string };
   image_data?: { url?: string };
   video_data?: { url?: string };
 };
@@ -31,22 +35,57 @@ export function trustedInstagramMediaUrl(value: unknown): string | null {
 }
 export function instagramMedia(items: InstagramMedia[] = []) {
   return items.flatMap((item, index) => {
-    const kind = item.video_data ? "video" : "image";
+    const audioUrl =
+      item.audio_data?.url ||
+      (item.mime_type?.startsWith("audio/") ? item.file_url : undefined);
+    const kind = audioUrl ? "voice" : item.video_data ? "video" : "image";
     const url = trustedInstagramMediaUrl(
-      item.video_data?.url ?? item.image_data?.url,
+      audioUrl ?? item.video_data?.url ?? item.image_data?.url,
     );
-    return url ? [{ kind: kind as "image" | "video", url, index }] : [];
+    return url
+      ? [{ kind: kind as "image" | "video" | "voice", url, index }]
+      : [];
   });
 }
 export function instagramAttachments(
   items: InstagramMedia[] | undefined,
   id: string,
 ): Attachment[] {
-  return instagramMedia(items).map((m) => ({
+  const media: Attachment[] = instagramMedia(items).map((m) => ({
     kind: m.kind,
     url: `/api/instagram/media/${id}/${m.index}`,
-    name: m.kind === "image" ? "Фото Instagram" : "Видео Instagram",
-    mime: m.kind === "image" ? "image/jpeg" : "video/mp4",
+    name:
+      m.kind === "voice"
+        ? "Голосовое сообщение"
+        : m.kind === "image"
+          ? "Фото Instagram"
+          : "Видео Instagram",
+    mime:
+      m.kind === "voice"
+        ? "audio/mp4"
+        : m.kind === "image"
+          ? "image/jpeg"
+          : "video/mp4",
     size: 0,
   }));
+  for (const item of items || []) {
+    const loc = item.location_data;
+    if (
+      loc &&
+      Number.isFinite(loc.latitude) &&
+      Number.isFinite(loc.longitude) &&
+      Math.abs(loc.latitude!) <= 90 &&
+      Math.abs(loc.longitude!) <= 180
+    )
+      media.push({
+        kind: "location",
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        url: "",
+        name: loc.name || "Геолокация",
+        mime: "application/geo+json",
+        size: 0,
+      });
+  }
+  return media;
 }

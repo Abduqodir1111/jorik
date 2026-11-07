@@ -35,11 +35,13 @@ export async function createApp(opts: {
   metaWebhook?: { verifyToken: string; appSecret: string };
 }) {
   const app = Fastify({ logger: false, bodyLimit: 65536 });
-  app.get("/sw.js", async (_req, reply) => reply
-    .header("Cache-Control", "no-store")
-    .header("Service-Worker-Allowed", "/")
-    .type("application/javascript")
-    .send(readFileSync(path.resolve("public/sw.js"), "utf8")));
+  app.get("/sw.js", async (_req, reply) =>
+    reply
+      .header("Cache-Control", "no-store")
+      .header("Service-Worker-Allowed", "/")
+      .type("application/javascript")
+      .send(readFileSync(path.resolve("public/sw.js"), "utf8")),
+  );
   app.get("/privacy", async (_request, reply) =>
     reply
       .type("text/html; charset=utf-8")
@@ -63,8 +65,14 @@ export async function createApp(opts: {
     await app.register(rateLimit, { max: 2400, timeWindow: "1 minute" });
   const db = openDb(opts.dataDir, opts.mode),
     clients = new Set<ServerResponse>();
-  const push = new PushService(db, loadVapid(opts.dataDir, opts.push),
-    opts.push?.subject || (opts.publicBaseUrl?.startsWith("https:") ? opts.publicBaseUrl : "https://inbox.storebooks.uz"));
+  const push = new PushService(
+    db,
+    loadVapid(opts.dataDir, opts.push),
+    opts.push?.subject ||
+      (opts.publicBaseUrl?.startsWith("https:")
+        ? opts.publicBaseUrl
+        : "https://inbox.storebooks.uz"),
+  );
   // A process crash after provider submission is ambiguous: never blindly resend.
   db.transaction(() => {
     db.prepare(
@@ -84,10 +92,21 @@ export async function createApp(opts: {
   const store = new Store(db, publish, (event) => {
     for (const c of clients) c.write("event: incoming\ndata: new\n\n");
     if (event) {
-      try { push.enqueue(event); }
-      catch { console.warn("Web Push enqueue failed"); }
+      try {
+        push.enqueue(event);
+      } catch {
+        console.warn("Web Push enqueue failed");
+      }
     }
   });
+  store.ordersChanged = () => {
+    for (const client of clients)
+      client.write("event: orders-changed\ndata: changed\n\n");
+  };
+  store.messageUpdated = (message) => {
+    const payload = `event: message-update\ndata: ${JSON.stringify(message)}\n\n`;
+    for (const client of clients) client.write(payload);
+  };
   const telegrams = new Map<string, TelegramIntegration>();
   if (opts.mode === "real" && opts.telegram) {
     for (const accountId of ["telegram-1", "telegram-2"] as const) {
@@ -157,7 +176,7 @@ export async function createApp(opts: {
     receive: receiveMeta,
     enqueue: inbox.enqueue,
   });
-  app.setErrorHandler((err, req, reply) => {
+  app.setErrorHandler((err, _req, reply) => {
     const e = err as Error & { statusCode?: number };
     reply.code(e instanceof z.ZodError ? 400 : (e.statusCode ?? 400)).send({
       error: e instanceof z.ZodError ? "Проверьте введённые данные" : e.message,
@@ -369,6 +388,67 @@ export async function createApp(opts: {
     "/api/telegram/history/:id",
     async (req) =>
       tg(store.conversation(req.params.id).accountId).history(req.params.id),
+  );
+  app.patch<{ Params: { id: string } }>(
+    "/api/messages/:id/text",
+    async (req) => {
+      const body = z
+        .object({
+          text: z.string().trim().min(1).max(4096),
+          expectedText: z.string().max(16384),
+        })
+        .strict()
+        .parse(req.body);
+      const row = db
+        .prepare(
+          "SELECT c.account_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=?",
+        )
+        .get(req.params.id) as { account_id: string } | undefined;
+      if (!row || !row.account_id.startsWith("telegram-"))
+        throw new Error("Редактирование доступно только в Telegram.");
+      return tg(row.account_id).edit(
+        req.params.id,
+        body.text,
+        body.expectedText,
+      );
+    },
+  );
+  app.put<{ Params: { id: string } }>(
+    "/api/messages/:id/reaction",
+    async (req) => {
+      const body = z
+        .object({ emoji: z.enum(["👍", "❤️", "🔥", "👏"]).nullable() })
+        .strict()
+        .parse(req.body);
+      const row = db
+        .prepare(
+          "SELECT c.account_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=?",
+        )
+        .get(req.params.id) as { account_id: string } | undefined;
+      if (!row || !row.account_id.startsWith("telegram-"))
+        throw new Error("Отправка реакций здесь доступна только в Telegram.");
+      return tg(row.account_id).react(req.params.id, body.emoji);
+    },
+  );
+  app.get<{ Params: { id: string }; Querystring: { compatible?: string } }>(
+    "/api/telegram/media/:id",
+    async (req, reply) => {
+      const row = db
+        .prepare(
+          "SELECT c.account_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=?",
+        )
+        .get(req.params.id) as { account_id: string } | undefined;
+      if (!row) return reply.code(404).send({ error: "Вложение не найдено" });
+      const { bytes, mime } = await tg(row.account_id).specialMedia(
+        req.params.id,
+        req.query.compatible === "1",
+      );
+      return reply
+        .type(mime)
+        .header("Cache-Control", "private, max-age=3600")
+        .header("X-Content-Type-Options", "nosniff")
+        .send(bytes);
+    },
   );
   app.get<{ Params: { id: string } }>(
     "/api/telegram/photos/:id",
@@ -661,11 +741,18 @@ export async function createApp(opts: {
     const slots = z
       .array(
         z
-          .object({ id: z.string().min(1).max(80).optional(), title: z.string().max(40), text: z.string().max(4000) })
+          .object({
+            id: z.string().min(1).max(80).optional(),
+            title: z.string().max(40),
+            text: z.string().max(4000),
+          })
           .strict(),
       )
       .max(MAX_QUICK_REPLIES)
-      .refine(slots => { const ids = slots.flatMap(s => s.id ? [s.id] : []); return new Set(ids).size === ids.length; }, "Повторяющиеся идентификаторы шаблонов")
+      .refine((slots) => {
+        const ids = slots.flatMap((s) => (s.id ? [s.id] : []));
+        return new Set(ids).size === ids.length;
+      }, "Повторяющиеся идентификаторы шаблонов")
       .parse(req.body);
     db.prepare(
       "INSERT INTO settings VALUES('quickReplies',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -832,9 +919,14 @@ export async function createApp(opts: {
     opts.worker === false
       ? undefined
       : setInterval(() => void store.tick(), 500);
-  const pushTimer = opts.worker === false ? undefined : setInterval(() => {
-    void push.flush().catch(() => console.warn("Web Push queue unavailable"));
-  }, 5000);
+  const pushTimer =
+    opts.worker === false
+      ? undefined
+      : setInterval(() => {
+          void push
+            .flush()
+            .catch(() => console.warn("Web Push queue unavailable"));
+        }, 5000);
   app.addHook("preClose", async () => {
     clearInterval(pushTimer);
     await push.close();

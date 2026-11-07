@@ -1,3 +1,10 @@
+import { gunzipSync } from "node:zlib";
+import {
+  richMedia,
+  telegramReactions,
+  RICH_MEDIA_LIMIT,
+} from "./telegram-rich-media.js";
+import { compatibleAudio } from "./audio-conversion.js";
 import {
   recoveryDelay,
   telegramNeedsLogin,
@@ -26,7 +33,6 @@ import bigInt from "big-integer";
 import { createHash, randomUUID } from "node:crypto";
 import type { Account, Message } from "../shared/types.js";
 import {
-  adapterFor,
   DemoAdapter,
   SendFailure,
   type Adapter,
@@ -264,6 +270,53 @@ export class TelegramIntegration {
           this.markInboxRead(update.peer.userId.toString(), update.maxId);
       },
       new Raw({ types: [Api.UpdateReadHistoryInbox] }),
+    );
+    c.addEventHandler(
+      (update: Api.TypeUpdate) => {
+        if (!this.authenticated || this.closed || this.client !== c) return;
+        this.live = this.live
+          .then(async () => {
+            if (!this.authenticated || this.closed || this.client !== c) return;
+            if (
+              update instanceof Api.UpdateEditMessage ||
+              update instanceof Api.UpdateEditChannelMessage
+            )
+              await this.importMessage(update.message, false, true);
+            else if (
+              update instanceof Api.UpdateMessageReactions &&
+              update.peer instanceof Api.PeerUser
+            ) {
+              const row = this.store.db
+                .prepare(
+                  "SELECT m.id,m.conversation_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE c.account_id=? AND c.external_id=? AND m.external_id=?",
+                )
+                .get(
+                  this.accountId,
+                  update.peer.userId.toString(),
+                  String(update.msgId),
+                ) as { id: string; conversation_id: string } | undefined;
+              if (row) {
+                this.store.db
+                  .prepare("UPDATE messages SET reactions=? WHERE id=?")
+                  .run(
+                    JSON.stringify(telegramReactions(update.reactions)),
+                    row.id,
+                  );
+                this.store.publishMessage(row.id, row.conversation_id);
+              }
+            }
+          })
+          .catch(() => {
+            /* A rejected edit must not disconnect the account. */
+          });
+      },
+      new Raw({
+        types: [
+          Api.UpdateEditMessage,
+          Api.UpdateEditChannelMessage,
+          Api.UpdateMessageReactions,
+        ],
+      }),
     );
     this.client = c;
     return c;
@@ -629,7 +682,11 @@ export class TelegramIntegration {
       accessHash: bigInt(row.access_hash),
     });
   }
-  private async importMessage(m: Api.TypeMessage, unread: boolean) {
+  private async importMessage(
+    m: Api.TypeMessage,
+    unread: boolean,
+    edited = false,
+  ) {
     if (
       !(m instanceof Api.Message) ||
       !(m.peerId instanceof Api.PeerUser) ||
@@ -660,10 +717,24 @@ export class TelegramIntegration {
       .get(this.accountId, id) as
       { id: string; telegram_read_inbox_max_id: number } | undefined;
     if (!c) return;
-    const photo = photoInfo(m);
+    const previousVersion = this.store.db
+      .prepare(
+        "SELECT edited_at FROM messages WHERE conversation_id=? AND external_id=?",
+      )
+      .get(c.id, String(m.id)) as { edited_at: string | null } | undefined;
+    const incomingEdit = m.editDate
+      ? new Date(m.editDate * 1000).toISOString()
+      : null;
+    if (
+      previousVersion?.edited_at &&
+      (!incomingEdit || previousVersion.edited_at > incomingEdit)
+    )
+      return;
+    const rich = richMedia(m);
+    const photo = rich ? undefined : photoInfo(m);
     const video = videoInfo(m);
     const document = documentInfo(m);
-    const mediaInfo = photo || video || document;
+    const mediaInfo = rich || photo || video || document;
     const text =
         m.message ||
         mediaInfo?.name ||
@@ -701,7 +772,7 @@ export class TelegramIntegration {
           );
     })();
     // A native outgoing message handles earlier incoming IDs, never newer ones.
-    if (m.out) this.markInboxRead(id, m.id - 1);
+    if (m.out && !edited) this.markInboxRead(id, m.id - 1);
     if (insertedIncoming && Math.abs(Date.now() - m.date * 1000) < 60_000)
       this.store.notifyIncoming({ conversationId: c.id, messageId });
     if (mediaInfo) {
@@ -716,12 +787,38 @@ export class TelegramIntegration {
           m.message || mediaInfo.name,
           JSON.stringify([
             {
-              kind: document ? "file" : video ? "video" : "image",
+              kind:
+                rich?.kind || (document ? "file" : video ? "video" : "image"),
               ...mediaInfo,
-              url: `/api/telegram/${document ? "documents" : video ? "videos" : "photos"}/${saved.id}`,
+              url: rich
+                ? rich.kind === "location"
+                  ? ""
+                  : `/api/telegram/media/${saved.id}`
+                : `/api/telegram/${document ? "documents" : video ? "videos" : "photos"}/${saved.id}`,
             },
           ]),
           saved.id,
+        );
+    }
+    const savedRow = this.store.db
+      .prepare(
+        "SELECT id,edited_at FROM messages WHERE conversation_id=? AND external_id=?",
+      )
+      .get(c.id, String(m.id)) as { id: string; edited_at: string | null };
+    const editAt = m.editDate
+      ? new Date(m.editDate * 1000).toISOString()
+      : null;
+    // History and edit updates share the same identity, unread and original date.
+    if (!savedRow.edited_at || !editAt || editAt >= savedRow.edited_at) {
+      this.store.db
+        .prepare(
+          "UPDATE messages SET text=?,edited_at=COALESCE(?,edited_at),reactions=? WHERE id=?",
+        )
+        .run(
+          text,
+          editAt,
+          JSON.stringify(telegramReactions(m.reactions)),
+          savedRow.id,
         );
     }
     if (m.replyTo instanceof Api.MessageReplyHeader) {
@@ -795,7 +892,248 @@ export class TelegramIntegration {
           )
           .run(external, snapshot ? JSON.stringify(snapshot) : null, row.id);
     }
-    this.changed();
+    if (edited) this.store.publishMessage(savedRow.id, c.id);
+    else this.changed();
+  }
+  private actionTarget(messageId: string) {
+    const row = this.store.db
+      .prepare(
+        "SELECT m.*,c.external_id AS peer_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND c.account_id=?",
+      )
+      .get(messageId, this.accountId) as
+      | {
+          external_id: string;
+          peer_id: string;
+          conversation_id: string;
+          text: string;
+          direction: string;
+          status: string;
+          attachments: string;
+        }
+      | undefined;
+    if (
+      !row ||
+      !row.external_id ||
+      !this.authenticated ||
+      !this.client?.connected
+    )
+      throw new Error("Сообщение или подключение Telegram недоступно.");
+    return row;
+  }
+  private actionLocks = new Set<string>();
+  async edit(messageId: string, text: string, expectedText: string) {
+    const row = this.actionTarget(messageId);
+    if (
+      row.direction !== "out" ||
+      row.status !== "sent" ||
+      JSON.parse(row.attachments).length
+    )
+      throw new Error(
+        "Редактировать можно только отправленный текст Telegram.",
+      );
+    if (row.text !== expectedText)
+      throw new Error(
+        "Сообщение уже изменилось. Откройте редактирование заново.",
+      );
+    if (text === row.text)
+      return this.store
+        .messages(row.conversation_id)
+        .find((m) => m.id === messageId)!;
+    if (this.actionLocks.has(messageId))
+      throw new Error("Операция с сообщением уже выполняется.");
+    this.actionLocks.add(messageId);
+    try {
+      const result = await this.client!.invoke(
+        new Api.messages.EditMessage({
+          peer: this.peer(row.peer_id),
+          id: Number(row.external_id),
+          message: text,
+          noWebpage: true,
+        }),
+      );
+      if (
+        result instanceof Api.Updates ||
+        result instanceof Api.UpdatesCombined
+      ) {
+        for (const u of result.updates)
+          if (u instanceof Api.UpdateEditMessage)
+            await this.importMessage(u.message, false, true);
+      }
+      // Telegram may return an empty updates container; never enqueue a new send.
+      this.store.db
+        .prepare("UPDATE messages SET text=?,edited_at=? WHERE id=?")
+        .run(
+          text,
+          new Date(Math.floor(Date.now() / 1000) * 1000).toISOString(),
+          messageId,
+        );
+      this.store.publishMessage(messageId, row.conversation_id);
+      return this.store
+        .messages(row.conversation_id)
+        .find((m) => m.id === messageId)!;
+    } catch (e) {
+      throw new Error(safeTelegramError(e));
+    } finally {
+      this.actionLocks.delete(messageId);
+    }
+  }
+  async react(messageId: string, emoji: string | null) {
+    const row = this.actionTarget(messageId);
+    try {
+      await this.client!.invoke(
+        new Api.messages.SendReaction({
+          peer: this.peer(row.peer_id),
+          msgId: Number(row.external_id),
+          reaction: emoji ? [new Api.ReactionEmoji({ emoticon: emoji })] : [],
+        }),
+      );
+      const ms = await this.client!.getMessages(this.peer(row.peer_id), {
+        ids: [Number(row.external_id)],
+      });
+      if (ms[0] instanceof Api.Message) {
+        this.store.db
+          .prepare("UPDATE messages SET reactions=? WHERE id=?")
+          .run(JSON.stringify(telegramReactions(ms[0].reactions)), messageId);
+        this.store.publishMessage(messageId, row.conversation_id);
+      }
+      return this.store
+        .messages(row.conversation_id)
+        .find((m) => m.id === messageId)!;
+    } catch (e) {
+      throw new Error(safeTelegramError(e));
+    }
+  }
+  private richRequests = new Map<
+    string,
+    Promise<{ bytes: Buffer; mime: string }>
+  >();
+  private conversionChain: Promise<unknown> = Promise.resolve();
+  async specialMedia(
+    messageId: string,
+    compatible = false,
+  ): Promise<{ bytes: Buffer; mime: string }> {
+    const key = `${messageId}:${compatible}`;
+    const current = this.richRequests.get(key);
+    if (current) return current;
+    const task = (async () => {
+      if (this.mediaActive >= 3)
+        await new Promise<void>((resolve) => this.mediaWaiting.push(resolve));
+      else this.mediaActive++;
+      try {
+        return await this.loadSpecialMedia(messageId, compatible);
+      } finally {
+        const next = this.mediaWaiting.shift();
+        if (next) next();
+        else this.mediaActive--;
+      }
+    })();
+    this.richRequests.set(key, task);
+    try {
+      return await task;
+    } finally {
+      this.richRequests.delete(key);
+    }
+  }
+  private async loadSpecialMedia(messageId: string, compatible: boolean) {
+    const row = this.store.db
+      .prepare(
+        "SELECT m.external_id,m.attachments,c.external_id AS peer_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND c.account_id=?",
+      )
+      .get(messageId, this.accountId) as
+      { external_id: string; attachments: string; peer_id: string } | undefined;
+    const att =
+      row &&
+      (JSON.parse(row.attachments) as Message["attachments"]).find(
+        (a) => a.kind === "voice" || a.kind === "sticker",
+      );
+    if (!row || !att || !this.opts.attachmentDir)
+      throw new Error("Вложение не найдено");
+    const dir = this.opts.attachmentDir;
+    const file = path.join(
+      dir,
+      "tg-rich-" +
+        createHash("sha256")
+          .update(this.accountId + ":" + messageId)
+          .digest("hex"),
+    );
+    let bytes: Buffer;
+    try {
+      bytes = await fs.readFile(file);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      if (!this.authenticated || !this.client?.connected)
+        throw new Error("Нет подключения к Telegram");
+      const m = (
+        await this.client.getMessages(this.peer(row.peer_id), {
+          ids: [Number(row.external_id)],
+        })
+      )[0];
+      const info = m instanceof Api.Message ? richMedia(m) : undefined;
+      if (
+        !info ||
+        info.kind !== att.kind ||
+        info.mime !== att.mime ||
+        info.size > RICH_MEDIA_LIMIT ||
+        (info.duration || 0) > 1800
+      )
+        throw new Error("Вложение недоступно или больше 20 МБ");
+      const data = await this.client.downloadMedia(m, {
+        signal: AbortSignal.timeout(60000),
+        progressCallback: (got, total) => {
+          if (
+            Number(got) > RICH_MEDIA_LIMIT ||
+            Number(total) > RICH_MEDIA_LIMIT
+          )
+            throw new Error("Вложение больше 20 МБ");
+        },
+      });
+      if (
+        !Buffer.isBuffer(data) ||
+        !data.length ||
+        data.length > RICH_MEDIA_LIMIT
+      )
+        throw new Error("Вложение недоступно");
+      bytes = data;
+      await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+      const tmp = file + "." + randomUUID() + ".tmp";
+      try {
+        await fs.writeFile(tmp, bytes, { mode: 0o600 });
+        await fs.rename(tmp, file);
+      } finally {
+        await fs.rm(tmp, { force: true });
+      }
+    }
+    if (att.mime === "application/x-tgsticker") {
+      const animation = JSON.parse(
+        gunzipSync(bytes, { maxOutputLength: 2 * 1024 * 1024 }).toString(
+          "utf8",
+        ),
+      );
+      if (
+        !Array.isArray(animation.layers) ||
+        (animation.assets || []).some(
+          (a: { p?: string; u?: string }) => a.p || a.u,
+        ) ||
+        (animation.fonts?.list || []).some((f: { fPath?: string }) => f.fPath)
+      )
+        throw new Error("Неподдерживаемый стикер");
+      return {
+        bytes: Buffer.from(JSON.stringify(animation)),
+        mime: "application/json",
+      };
+    }
+    if (
+      compatible &&
+      att.kind === "voice" &&
+      ["audio/ogg", "audio/opus"].includes(att.mime)
+    ) {
+      const convert = this.conversionChain.then(() =>
+        compatibleAudio(file, file + ".m4a"),
+      );
+      this.conversionChain = convert.catch(() => {});
+      return { bytes: await convert, mime: "audio/mp4" };
+    }
+    return { bytes, mime: att.mime };
   }
   private photos = new Map<string, Promise<{ bytes: Buffer; mime: string }>>();
   private mediaActive = 0;

@@ -25,6 +25,7 @@ import MessageTimeline from "./MessageTimeline";
 import { time, date } from "./message-format";
 import { coalesceAsync } from "./refresh-queue";
 import {
+  Check,
   Package,
   MessageSquare,
   Send,
@@ -65,14 +66,16 @@ async function api<T = any>(
   return data;
 }
 export default function App() {
-  const { slots, hydrate, dark, toggleTheme } =
-    useOperator();
+  const { slots, hydrate, dark, toggleTheme } = useOperator();
   const [orderContext, setOrderContext] = useState<OrderContext | undefined>();
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [orderRequest, setOrderRequest] = useState(0);
-  const [orderCloseRequest,setOrderCloseRequest]=useState(0);
-  const [clockNow,setClockNow]=useState(Date.now);
-  useEffect(()=>{const t=setInterval(()=>setClockNow(Date.now()),30000);return()=>clearInterval(t);},[]);
+  const [orderCloseRequest, setOrderCloseRequest] = useState(0);
+  const [clockNow, setClockNow] = useState(Date.now);
+  useEffect(() => {
+    const t = setInterval(() => setClockNow(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
   const [orderPanelOpen, setOrderPanelOpen] = useState(false);
   const [replyTargets, setReplyTargets] = useState<
     Record<string, Message | undefined>
@@ -95,10 +98,11 @@ export default function App() {
   useEffect(() => {
     if (!composerFocused) return;
     const viewport = window.visualViewport;
-    const update = () => setComposerViewport({
-      height: viewport?.height ?? window.innerHeight,
-      top: viewport?.offsetTop ?? 0,
-    });
+    const update = () =>
+      setComposerViewport({
+        height: viewport?.height ?? window.innerHeight,
+        top: viewport?.offsetTop ?? 0,
+      });
     update();
     viewport?.addEventListener("resize", update);
     viewport?.addEventListener("scroll", update);
@@ -124,10 +128,15 @@ export default function App() {
     [selected, setSelected] = useState<string | null>(null),
     [page, setPage] = useState("inbox");
   useEffect(() => {
-    setComposerFocused(Boolean(
-      auth && page === "inbox" && selected &&
-      inputRef.current && document.activeElement === inputRef.current
-    ));
+    setComposerFocused(
+      Boolean(
+        auth &&
+        page === "inbox" &&
+        selected &&
+        inputRef.current &&
+        document.activeElement === inputRef.current,
+      ),
+    );
   }, [auth, page, selected]);
   const [filter, setFilter] = useState("all"),
     [q, setQ] = useState(""),
@@ -157,12 +166,82 @@ export default function App() {
   const unsaved = useRef(new Map<string, { text: string; revision: number }>()),
     draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null),
     revisionCounter = useRef(0);
-  const report = (e: unknown) =>
-    setError(e instanceof Error ? e.message : "Не удалось выполнить действие");
+  const report = useCallback(
+    (e: unknown) =>
+      setError(
+        e instanceof Error ? e.message : "Не удалось выполнить действие",
+      ),
+    [],
+  );
   const selectConversation = useCallback((id: string) => {
     setSelected(id);
     setTemplatesOpen(false);
   }, []);
+  const [editing, setEditing] = useState<{
+    message: Message;
+    text: string;
+  } | null>(null);
+  const patchMessage = useCallback((message: Message) => {
+    const cache = chatCache.current;
+    const entry = cache?.get(message.conversationId);
+    if (entry)
+      cache?.put(
+        message.conversationId,
+        entry.messages.map((m) => (m.id === message.id ? message : m)),
+      );
+    if (selectedRef.current === message.conversationId)
+      setMessages((old) => old.map((m) => (m.id === message.id ? message : m)));
+    setConversations((old) =>
+      old.map((c) =>
+        c.id === message.conversationId
+          ? {
+              ...c,
+              preview: cache?.get(c.id)?.messages.at(-1)?.text || c.preview,
+            }
+          : c,
+      ),
+    );
+  }, []);
+  const editMessage = useCallback((message: Message) => {
+    setEditing({ message, text: message.text });
+    setTemplatesOpen(false);
+    inputRef.current?.focus();
+  }, []);
+  const reactMessage = useCallback(
+    async (message: Message, emoji: string | null) => {
+      try {
+        patchMessage(
+          await api<Message>(`/messages/${message.id}/reaction`, "PUT", {
+            emoji,
+          }),
+        );
+      } catch (e) {
+        report(e);
+      }
+    },
+    [patchMessage, report],
+  );
+  async function saveEdit() {
+    if (!editing || sendLock.current || !editing.text.trim()) return;
+    sendLock.current = true;
+    setSending(true);
+    const current = editing;
+    try {
+      patchMessage(
+        await api<Message>(`/messages/${current.message.id}/text`, "PATCH", {
+          text: current.text,
+          expectedText: current.message.text,
+        }),
+      );
+      setEditing(null);
+    } catch (e) {
+      report(e);
+    } finally {
+      sendLock.current = false;
+      setSending(false);
+    }
+  }
+  useEffect(() => setEditing(null), [selected]);
   const replyToMessage = useCallback((message: Message) => {
     setReplyTargets((old) => ({ ...old, [message.conversationId]: message }));
     inputRef.current?.focus();
@@ -219,7 +298,7 @@ export default function App() {
     if (!auth) return;
     const url = new URL(window.location.href);
     const id = url.searchParams.get("conversation");
-    if (!id || !conversations.some(c => c.id === id)) return;
+    if (!id || !conversations.some((c) => c.id === id)) return;
     setPage("inbox");
     setShowAllChats(true);
     setFilter("all");
@@ -232,9 +311,12 @@ export default function App() {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
     const open = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin ||
-          event.data?.type !== "OPEN_CONVERSATION" ||
-          typeof event.data.conversationId !== "string") return;
+      if (
+        event.origin !== window.location.origin ||
+        event.data?.type !== "OPEN_CONVERSATION" ||
+        typeof event.data.conversationId !== "string"
+      )
+        return;
       const url = new URL(window.location.href);
       url.searchParams.set("conversation", event.data.conversationId);
       window.history.replaceState(null, "", url);
@@ -258,8 +340,21 @@ export default function App() {
   useEffect(() => {
     if (!auth) return;
     const events = new EventSource("/api/events");
+    events.addEventListener("message-update", (event) => {
+      try {
+        patchMessage(JSON.parse((event as MessageEvent).data));
+      } catch {
+        /* Ignore malformed stream events. */
+      }
+    });
     events.addEventListener("incoming", () => notificationSound.play());
-    events.onopen = () => setOnline(true);
+    events.addEventListener("orders-changed", () =>
+      window.dispatchEvent(new Event("jorik:orders-changed")),
+    );
+    events.onopen = () => {
+      setOnline(true);
+      window.dispatchEvent(new Event("jorik:orders-changed"));
+    };
     events.onerror = () => setOnline(false);
     let active = true;
     const update = coalesceAsync(async () => {
@@ -587,10 +682,10 @@ export default function App() {
     }
   }
   useEffect(() => {
-    setTemplateIndex(i => Math.min(i, Math.max(0, slots.length - 1)));
+    setTemplateIndex((i) => Math.min(i, Math.max(0, slots.length - 1)));
   }, [slots]);
   function insertTemplate(index: number) {
-    if (!slots[index]?.text || !selected) return;
+    if (!slots[index]?.text || !selected || editing) return;
     draft(slots[index].text);
     setTemplatesOpen(false);
     inputRef.current?.focus();
@@ -620,9 +715,17 @@ export default function App() {
           setTemplatesOpen(false);
         }
       }
-      if (event.ctrlKey && !event.altKey && /^[1-9]$/.test(event.key)) {
+      if (
+        !editing &&
+        event.ctrlKey &&
+        !event.altKey &&
+        /^[1-9]$/.test(event.key)
+      ) {
         const slot = slots[Number(event.key) - 1];
-        if (slot?.text.trim()) { event.preventDefault(); void send(slot.text); }
+        if (slot?.text.trim()) {
+          event.preventDefault();
+          void send(slot.text);
+        }
       }
     };
     window.addEventListener("keydown", keydown);
@@ -732,10 +835,14 @@ export default function App() {
   return (
     <div
       className={`app ${orderPanelOpen ? "has-order-panel" : ""} ${page === "inbox" ? "inbox-page" : ""} ${page === "inbox" && selected && chatExpanded ? "chat-expanded" : ""} ${composerFocused && page === "inbox" && selected ? "composer-focused" : ""}`}
-      style={composerFocused && composerViewport ? {
-        "--chat-viewport-height": `${composerViewport.height}px`,
-        "--chat-viewport-top": `${composerViewport.top}px`,
-      } as CSSProperties : undefined}
+      style={
+        composerFocused && composerViewport
+          ? ({
+              "--chat-viewport-height": `${composerViewport.height}px`,
+              "--chat-viewport-top": `${composerViewport.top}px`,
+            } as CSSProperties)
+          : undefined
+      }
     >
       <aside
         className="sidebar bg-slate-900 dark:bg-black text-slate-400"
@@ -751,7 +858,8 @@ export default function App() {
           title="Входящие"
           onClick={() => setPage("inbox")}
         >
-          <MessageSquare size={22} /><span className="rail-label">Чаты</span>
+          <MessageSquare size={22} />
+          <span className="rail-label">Чаты</span>
           {conversations.some((c) => c.unread > 0) && (
             <span className="rail-count">
               {conversations.reduce((n, c) => n + c.unread, 0)}
@@ -765,7 +873,8 @@ export default function App() {
           title="Заказы"
           onClick={() => setPage("orders")}
         >
-          <Package size={22} /><span className="rail-label">Заказы</span>
+          <Package size={22} />
+          <span className="rail-label">Заказы</span>
         </button>
         <div className="rail-bottom">
           <button
@@ -784,7 +893,8 @@ export default function App() {
             title="Настройки"
             onClick={() => setPage("settings")}
           >
-            <Settings size={22} /><span className="rail-label">Настройки</span>
+            <Settings size={22} />
+            <span className="rail-label">Настройки</span>
           </button>
         </div>
       </aside>
@@ -830,13 +940,52 @@ export default function App() {
               <h1>
                 Входящие <span>{filtered.length}</span>
               </h1>
-              <span className={"list-online " + (online ? "is-online" : "")}><i />{online ? "Онлайн" : "Нет связи"}</span>
+              <span className={"list-online " + (online ? "is-online" : "")}>
+                <i />
+                {online ? "Онлайн" : "Нет связи"}
+              </span>
             </div>
             <div className="inbox-filters" aria-label="Быстрые фильтры">
-              <button aria-pressed={filter === "all" && !unread} onClick={() => {setFilter("all");setUnread(false);}}>Все</button>
-              <button className="waiting-filter" aria-pressed={unread} onClick={() => {setFilter("all");setUnread(!unread);}}><i className="waiting-dot" aria-hidden="true"/>Ждут ответа</button>
-              <button className="telegram-filter" aria-pressed={filter === "telegram" && !unread} onClick={() => {setFilter("telegram");setUnread(false);}}>Telegram</button>
-              <button className="instagram-filter" aria-pressed={filter === "instagram" && !unread} onClick={() => {setFilter("instagram");setUnread(false);}}>Instagram</button>
+              <button
+                aria-pressed={filter === "all" && !unread}
+                onClick={() => {
+                  setFilter("all");
+                  setUnread(false);
+                }}
+              >
+                Все
+              </button>
+              <button
+                className="waiting-filter"
+                aria-pressed={unread}
+                onClick={() => {
+                  setFilter("all");
+                  setUnread(!unread);
+                }}
+              >
+                <i className="waiting-dot" aria-hidden="true" />
+                Ждут ответа
+              </button>
+              <button
+                className="telegram-filter"
+                aria-pressed={filter === "telegram" && !unread}
+                onClick={() => {
+                  setFilter("telegram");
+                  setUnread(false);
+                }}
+              >
+                Telegram
+              </button>
+              <button
+                className="instagram-filter"
+                aria-pressed={filter === "instagram" && !unread}
+                onClick={() => {
+                  setFilter("instagram");
+                  setUnread(false);
+                }}
+              >
+                Instagram
+              </button>
             </div>
             <div className="search">
               <Search size={17} />
@@ -924,11 +1073,32 @@ export default function App() {
                   >
                     <ArrowLeft size={20} />
                   </button>
-                  <span className={"workspace-platform "+a.platform}><PlatformIcon platform={a.platform}/></span>
+                  <span className={"workspace-platform " + a.platform}>
+                    <PlatformIcon platform={a.platform} />
+                  </span>
                   <div className="workspace-contact">
-                    <div className="workspace-contact-title"><h2>{c.username ? "@"+c.username.replace(/^@/,"") : c.name}</h2><StoreBadge name={a.name} color={a.color}/></div>
+                    <div className="workspace-contact-title">
+                      <h2>
+                        {c.username
+                          ? "@" + c.username.replace(/^@/, "")
+                          : c.name}
+                      </h2>
+                      <StoreBadge name={a.name} color={a.color} />
+                    </div>
                     <small>Диалог через {a.name}</small>
-                    {a.adapter==="instagram-graph" && <span className={"meta-reply-window "+(instagramWindowClosed?"closed":"")} title="Расчёт от последнего входящего сообщения; возможность ответа также зависит от разрешений Meta">{instagramWindowClosed?"Окно ответа Meta закрыто":`Окно Meta: ещё ${Math.max(1,Math.ceil((Date.parse(lastInstagramIncoming!.createdAt)+86400000-clockNow)/60000))} мин`}</span>}
+                    {a.adapter === "instagram-graph" && (
+                      <span
+                        className={
+                          "meta-reply-window " +
+                          (instagramWindowClosed ? "closed" : "")
+                        }
+                        title="Расчёт от последнего входящего сообщения; возможность ответа также зависит от разрешений Meta"
+                      >
+                        {instagramWindowClosed
+                          ? "Окно ответа Meta закрыто"
+                          : `Окно Meta: ещё ${Math.max(1, Math.ceil((Date.parse(lastInstagramIncoming!.createdAt) + 86400000 - clockNow) / 60000))} мин`}
+                      </span>
+                    )}
                   </div>
                   <button
                     className="icon expand-chat"
@@ -954,15 +1124,25 @@ export default function App() {
                   <button
                     className="icon create-order"
                     title="Создать заказ"
-                    aria-label={orderPanelOpen?"Свернуть панель заказа":"Создать заказ"}
+                    aria-label={
+                      orderPanelOpen
+                        ? "Свернуть панель заказа"
+                        : "Создать заказ"
+                    }
                     aria-pressed={orderPanelOpen}
                     onClick={() => {
-                      if(orderPanelOpen){setOrderCloseRequest(x=>x+1);return;}
+                      if (orderPanelOpen) {
+                        setOrderCloseRequest((x) => x + 1);
+                        return;
+                      }
                       setOrderContext({ conversation: c, account: a });
                       setOrderRequest((x) => x + 1);
                     }}
                   >
-                    <Package size={17} /><span>{orderPanelOpen?"Свернуть заказ":"Создать заказ"}</span>
+                    <Package size={17} />
+                    <span>
+                      {orderPanelOpen ? "Свернуть заказ" : "Создать заказ"}
+                    </span>
                   </button>
                   <button
                     title="Информация о клиенте"
@@ -1023,6 +1203,8 @@ export default function App() {
                       dismissed={dismissed}
                       setDismissed={setDismissed}
                       onReply={replyToMessage}
+                      onEdit={editMessage}
+                      onReact={reactMessage}
                     />
                     <div ref={bottom} />
                   </div>
@@ -1080,12 +1262,14 @@ export default function App() {
                         >
                           <b>{slot.title || `Слот ${i + 1}`}</b>
                           <span>{slot.text || "Не настроен"}</span>
-                          {quickReplyHotkey(i) && <kbd>{quickReplyHotkey(i)}</kbd>}
+                          {quickReplyHotkey(i) && (
+                            <kbd>{quickReplyHotkey(i)}</kbd>
+                          )}
                         </button>
                       ))}
                     </div>
                   )}
-                  {replyTargets[c.id] && (
+                  {replyTargets[c.id] && !editing && (
                     <div className="reply-strip border-l-4 border-blue-500">
                       <Reply size={16} />
                       <div>
@@ -1110,7 +1294,7 @@ export default function App() {
                       </button>
                     </div>
                   )}
-                  {uploads[c.id] && (
+                  {uploads[c.id] && !editing && (
                     <div className="reply-strip">
                       <img
                         src={"/api/uploads/" + uploads[c.id]?.id}
@@ -1127,16 +1311,31 @@ export default function App() {
                       </button>
                     </div>
                   )}
+                  {editing && (
+                    <div className="reply-strip">
+                      <span>Редактирование сообщения</span>
+                      <button
+                        aria-label="Отменить редактирование"
+                        onClick={() => setEditing(null)}
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  )}
                   <div className="composer">
                     <textarea
                       ref={inputRef}
                       aria-label="Текст ответа"
                       placeholder="Напишите сообщение…"
-                      value={drafts[c.id] ?? ""}
+                      value={editing?.text ?? drafts[c.id] ?? ""}
                       disabled={sending}
                       onFocus={() => setComposerFocused(true)}
                       onBlur={() => setComposerFocused(false)}
                       onChange={(e) => {
+                        if (editing) {
+                          setEditing({ ...editing, text: e.target.value });
+                          return;
+                        }
                         draft(e.target.value);
                         if (e.target.value === "/") {
                           setTemplatesOpen(true);
@@ -1155,8 +1354,12 @@ export default function App() {
                           else if (e.key === "Enter")
                             insertTemplate(templateIndex);
                           else
-                            setTemplateIndex(
-                              (i) => nextTemplateIndex(i, e.key === "ArrowDown" ? 1 : -1, slots.length),
+                            setTemplateIndex((i) =>
+                              nextTemplateIndex(
+                                i,
+                                e.key === "ArrowDown" ? 1 : -1,
+                                slots.length,
+                              ),
                             );
                           return;
                         }
@@ -1166,7 +1369,8 @@ export default function App() {
                           !e.nativeEvent.isComposing
                         ) {
                           e.preventDefault();
-                          void send();
+                          if (editing) void saveEdit();
+                          else void send();
                         }
                       }}
                     />
@@ -1184,7 +1388,7 @@ export default function App() {
                       <button
                         className="attachment-note"
                         aria-label="Прикрепить изображение"
-                        disabled={uploading || sending}
+                        disabled={uploading || sending || !!editing}
                         onClick={() => fileInput.current?.click()}
                       >
                         <Paperclip size={18} />
@@ -1195,16 +1399,23 @@ export default function App() {
                         disabled={
                           sending ||
                           !online ||
-                          (!drafts[c.id]?.trim() && !uploads[c.id]) ||
+                          (!(editing?.text ?? drafts[c.id])?.trim() &&
+                            !uploads[c.id]) ||
                           uploading ||
                           instagramWindowClosed ||
                           !a.capabilities.text ||
                           a.state !== "connected"
                         }
-                        onClick={() => void send()}
+                        onClick={() =>
+                          editing ? void saveEdit() : void send()
+                        }
                       >
-                        {sending ? "В очереди…" : "Отправить"}
-                        <Send size={16} />
+                        {sending
+                          ? "Подождите…"
+                          : editing
+                            ? "Сохранить"
+                            : "Отправить"}
+                        {editing ? <Check size={16} /> : <Send size={16} />}
                       </button>
                     </div>
                   </div>
@@ -1252,7 +1463,10 @@ export default function App() {
                     <button
                       className="primary"
                       style={{ marginTop: 20 }}
-                      onClick={() => { setAccountsExpanded(true); setPage("settings"); }}
+                      onClick={() => {
+                        setAccountsExpanded(true);
+                        setPage("settings");
+                      }}
                     >
                       Подключить Telegram 1
                     </button>
@@ -1304,7 +1518,8 @@ export default function App() {
                 Отметить непрочитанным
               </button>
               <small>
-                Прочтение и ответы синхронизируются с подключёнными аккаунтами; возможности Instagram зависят от событий Meta.
+                Прочтение и ответы синхронизируются с подключёнными аккаунтами;
+                возможности Instagram зависят от событий Meta.
               </small>
             </aside>
           )}
@@ -1319,141 +1534,176 @@ export default function App() {
           onCloseRequest={() => setOrderContext(undefined)}
           onPanelChange={setOrderPanelOpen}
         />
-        {page === "settings" && <SettingsView accountsExpanded={accountsExpanded} onToggleAccounts={() => setAccountsExpanded(value => !value)} accountsContent={<>
-              <div className="account-grid">
-                {accounts.map((a) => (
-                  <article className="account-card" key={a.id}>
-                    <div className="account-card-top">
-                      <span className={"platform large " + a.platform}>
-                        <PlatformIcon platform={a.platform} />
-                      </span>
-                      <span className={"state-pill " + a.state}>
-                        {a.state === "connected"
-                          ? "Подключено"
-                          : a.state === "offline"
-                            ? "Нет связи"
-                            : "Не настроено"}
-                      </span>
-                    </div>
-                    <h2 className="account-display-name"><StoreBadge name={a.name} color={a.color}/></h2>
-                    <p className="account-platform-label">{a.platform === "telegram" ? "Telegram" : "Instagram"} · {a.state === "connected" ? "Готов к работе" : "Требует внимания"}</p>
-                    <details className="account-details"><summary>Настройка подключения</summary>
-                    <AccountName account={a} onSaved={refresh} />
-                    <p>
-                      {a.platform === "telegram" ? "Telegram" : "Instagram"} ·{" "}
-                      {a.mode === "demo"
-                        ? "Демонстрация"
-                        : "Реальное подключение"}
-                    </p>
-                    <dl>
-                      <dt>Адаптер</dt>
-                      <dd>
-                        {a.adapter === "demo"
-                          ? "Демонстрационный"
-                          : a.adapter === "telegram-mtproto"
-                            ? "Telegram MTProto"
-                            : a.adapter === "instagram-graph"
-                              ? "Instagram · Meta API"
-                              : "Не выбран"}
-                      </dd>
-                      <dt>Синхронизация</dt>
-                      <dd>
-                        {a.lastSync
-                          ? `${date(a.lastSync)}, ${time(a.lastSync)}`
-                          : "Ещё не выполнялась"}
-                      </dd>
-                      <dt>Возможности</dt>
-                      <dd>
-                        {a.capabilities.text
-                          ? a.capabilities.images
-                            ? "Текст, фото, сохранённая история"
-                            : "Текст, сохранённая история"
-                          : "Ожидают выбора API"}
-                      </dd>
-                    </dl>
-                    {a.error && <p className="error">{a.error}</p>}
-                    {mode === "real" && a.platform === "telegram" && (
-                      <TelegramConnect
-                        accountId={a.id}
-                        active={page === "settings" && accountsExpanded}
-                        onChange={() => void refresh().catch(report)}
-                      />
-                    )}
-                    {mode === "real" && a.platform === "instagram" && (
-                      <div className="instagram-connect">
-                        <p>
-                          {a.receiveMode === "webhook"
-                            ? a.webhookConfigured
-                              ? "Приём через вебхуки Meta. Фоновая загрузка списка чатов отключена. История выбранного диалога — до 10 сообщений по запросу."
-                              : "Фоновая загрузка отключена. Для новых сообщений нужно завершить настройку вебхуков Meta. Сохранённые чаты доступны."
-                            : "Проверка новых сообщений каждые 5 секунд: до 50 диалогов и 30 сообщений при открытии."}{" "}
-                          Текстовые ответы — в течение 24 часов после сообщения
-                          клиента. Фото и видео открываются в чате; недоступные
-                          вложения — в Instagram.
-                        </p>
-                        <button
-                          className="secondary"
-                          onClick={() =>
-                            action(() =>
-                              api("/instagram/sync", "POST", {
-                                accountId: a.id,
-                              }),
-                            )
-                          }
-                        >
-                          {a.receiveMode === "webhook"
-                            ? "Проверить подключение"
-                            : "Обновить Instagram"}
-                        </button>
-                        <button
-                          className="secondary"
-                          disabled={a.recentImport?.state === "running"}
-                          onClick={() =>
-                            action(() =>
-                              api("/instagram/import-recent", "POST", {
-                                accountId: a.id,
-                              }),
-                            )
-                          }
-                        >
-                          {a.recentImport?.state === "running"
-                            ? `Загружаем: ${a.recentImport.imported} из 50…`
-                            : "Загрузить 50 последних чатов"}
-                        </button>
-                        {a.recentImport?.error && (
-                          <p className="error">{a.recentImport.error}</p>
-                        )}
+        {page === "settings" && (
+          <SettingsView
+            accountsExpanded={accountsExpanded}
+            onToggleAccounts={() => setAccountsExpanded((value) => !value)}
+            accountsContent={
+              <>
+                <div className="account-grid">
+                  {accounts.map((a) => (
+                    <article className="account-card" key={a.id}>
+                      <div className="account-card-top">
+                        <span className={"platform large " + a.platform}>
+                          <PlatformIcon platform={a.platform} />
+                        </span>
+                        <span className={"state-pill " + a.state}>
+                          {a.state === "connected"
+                            ? "Подключено"
+                            : a.state === "offline"
+                              ? "Нет связи"
+                              : "Не настроено"}
+                        </span>
                       </div>
-                    )}
-                    {mode === "demo" && (
-                      <button
-                        className="secondary"
-                        onClick={() =>
-                          action(() =>
-                            api(`/demo/accounts/${a.id}/toggle`, "POST", {}),
-                          )
-                        }
-                      >
+                      <h2 className="account-display-name">
+                        <StoreBadge name={a.name} color={a.color} />
+                      </h2>
+                      <p className="account-platform-label">
+                        {a.platform === "telegram" ? "Telegram" : "Instagram"} ·{" "}
                         {a.state === "connected"
-                          ? "Симулировать потерю связи"
-                          : "Восстановить подключение"}
-                      </button>
-                    )}
-                    </details>
-                  </article>
-                ))}
-              </div>
-              <div className="note">
-                <Info size={20} />
-                <p>
-                  {mode === "demo"
-                    ? "Демонстрационный адаптер работает только локально. Сообщения не уходят во внешние сервисы."
-                    : "Подключите каждый Telegram-аккаунт отдельно. Диалоги и ответы привязаны к выбранному аккаунту. Instagram принимает сообщения через вебхуки Meta."}
-                </p>
-              </div>
-</>} ownerName={ownerName} online={online} mode={mode} sound={notificationSound} onSaveOwner={async name=>{await api("/settings","PUT",{ownerName:name});setOwnerName(name);}} onLogout={localAccess?undefined:()=>setLogoutOpen(true)}/>}
+                          ? "Готов к работе"
+                          : "Требует внимания"}
+                      </p>
+                      <details className="account-details">
+                        <summary>Настройка подключения</summary>
+                        <AccountName account={a} onSaved={refresh} />
+                        <p>
+                          {a.platform === "telegram" ? "Telegram" : "Instagram"}{" "}
+                          ·{" "}
+                          {a.mode === "demo"
+                            ? "Демонстрация"
+                            : "Реальное подключение"}
+                        </p>
+                        <dl>
+                          <dt>Адаптер</dt>
+                          <dd>
+                            {a.adapter === "demo"
+                              ? "Демонстрационный"
+                              : a.adapter === "telegram-mtproto"
+                                ? "Telegram MTProto"
+                                : a.adapter === "instagram-graph"
+                                  ? "Instagram · Meta API"
+                                  : "Не выбран"}
+                          </dd>
+                          <dt>Синхронизация</dt>
+                          <dd>
+                            {a.lastSync
+                              ? `${date(a.lastSync)}, ${time(a.lastSync)}`
+                              : "Ещё не выполнялась"}
+                          </dd>
+                          <dt>Возможности</dt>
+                          <dd>
+                            {a.capabilities.text
+                              ? a.capabilities.images
+                                ? "Текст, фото, сохранённая история"
+                                : "Текст, сохранённая история"
+                              : "Ожидают выбора API"}
+                          </dd>
+                        </dl>
+                        {a.error && <p className="error">{a.error}</p>}
+                        {mode === "real" && a.platform === "telegram" && (
+                          <TelegramConnect
+                            accountId={a.id}
+                            active={page === "settings" && accountsExpanded}
+                            onChange={() => void refresh().catch(report)}
+                          />
+                        )}
+                        {mode === "real" && a.platform === "instagram" && (
+                          <div className="instagram-connect">
+                            <p>
+                              {a.receiveMode === "webhook"
+                                ? a.webhookConfigured
+                                  ? "Приём через вебхуки Meta. Фоновая загрузка списка чатов отключена. История выбранного диалога — до 10 сообщений по запросу."
+                                  : "Фоновая загрузка отключена. Для новых сообщений нужно завершить настройку вебхуков Meta. Сохранённые чаты доступны."
+                                : "Проверка новых сообщений каждые 5 секунд: до 50 диалогов и 30 сообщений при открытии."}{" "}
+                              Текстовые ответы — в течение 24 часов после
+                              сообщения клиента. Фото и видео открываются в
+                              чате; недоступные вложения — в Instagram.
+                            </p>
+                            <button
+                              className="secondary"
+                              onClick={() =>
+                                action(() =>
+                                  api("/instagram/sync", "POST", {
+                                    accountId: a.id,
+                                  }),
+                                )
+                              }
+                            >
+                              {a.receiveMode === "webhook"
+                                ? "Проверить подключение"
+                                : "Обновить Instagram"}
+                            </button>
+                            <button
+                              className="secondary"
+                              disabled={a.recentImport?.state === "running"}
+                              onClick={() =>
+                                action(() =>
+                                  api("/instagram/import-recent", "POST", {
+                                    accountId: a.id,
+                                  }),
+                                )
+                              }
+                            >
+                              {a.recentImport?.state === "running"
+                                ? `Загружаем: ${a.recentImport.imported} из 50…`
+                                : "Загрузить 50 последних чатов"}
+                            </button>
+                            {a.recentImport?.error && (
+                              <p className="error">{a.recentImport.error}</p>
+                            )}
+                          </div>
+                        )}
+                        {mode === "demo" && (
+                          <button
+                            className="secondary"
+                            onClick={() =>
+                              action(() =>
+                                api(
+                                  `/demo/accounts/${a.id}/toggle`,
+                                  "POST",
+                                  {},
+                                ),
+                              )
+                            }
+                          >
+                            {a.state === "connected"
+                              ? "Симулировать потерю связи"
+                              : "Восстановить подключение"}
+                          </button>
+                        )}
+                      </details>
+                    </article>
+                  ))}
+                </div>
+                <div className="note">
+                  <Info size={20} />
+                  <p>
+                    {mode === "demo"
+                      ? "Демонстрационный адаптер работает только локально. Сообщения не уходят во внешние сервисы."
+                      : "Подключите каждый Telegram-аккаунт отдельно. Диалоги и ответы привязаны к выбранному аккаунту. Instagram принимает сообщения через вебхуки Meta."}
+                  </p>
+                </div>
+              </>
+            }
+            ownerName={ownerName}
+            online={online}
+            mode={mode}
+            sound={notificationSound}
+            onSaveOwner={async (name) => {
+              await api("/settings", "PUT", { ownerName: name });
+              setOwnerName(name);
+            }}
+            onLogout={localAccess ? undefined : () => setLogoutOpen(true)}
+          />
+        )}
       </main>
-      {logoutOpen && <LogoutDialog onCancel={() => setLogoutOpen(false)} onConfirm={logout}/>}
+      {logoutOpen && (
+        <LogoutDialog
+          onCancel={() => setLogoutOpen(false)}
+          onConfirm={logout}
+        />
+      )}
     </div>
   );
 }

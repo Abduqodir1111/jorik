@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   Ban,
   Mail,
@@ -18,7 +19,7 @@ type Props = {
   onRefuse: (order: Order) => void;
   onDelete: (order: Order) => void;
 };
-export default function OrderCard({
+export default memo(function OrderCard({
   order,
   busy,
   onEdit,
@@ -123,4 +124,4 @@ export default function OrderCard({
       </footer>
     </article>
   );
-}
+});

@@ -43,13 +43,18 @@ export interface Conversation {
   draft: string;
 }
 export interface Attachment {
-  kind: "image" | "video" | "file" | "voice";
+  latitude?: number;
+  longitude?: number;
+  duration?: number;
+  kind: "image" | "video" | "file" | "voice" | "sticker" | "location";
   url: string;
   name: string;
   mime: string;
   size: number;
 }
 export interface Message {
+  editedAt?: string | null;
+  reactions?: { emoji: string; count: number; chosen: boolean }[];
   replyToId?: string | null;
   reply_to?: { sender_name: string; text: string; message_id?: string };
   readAt?: string | null;

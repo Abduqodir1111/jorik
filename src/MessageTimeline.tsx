@@ -1,6 +1,13 @@
+import VoicePlayer from "./VoicePlayer";
+import LocationCard from "./LocationCard";
+import StickerRenderer from "./StickerRenderer";
+import MessageActions from "./MessageActions";
 import React, {
   memo,
   useMemo,
+  useState,
+  useRef,
+  useEffect,
   type Dispatch,
   type SetStateAction,
 } from "react";
@@ -22,13 +29,24 @@ export default memo(function MessageTimeline({
   dismissed,
   setDismissed,
   onReply,
+  onEdit,
+  onReact,
 }: {
   messages: Message[];
   platform: Account["platform"];
   dismissed: Record<string, boolean>;
   setDismissed: Dispatch<SetStateAction<Record<string, boolean>>>;
   onReply: (message: Message) => void;
+  onEdit: (message: Message) => void;
+  onReact: (message: Message, emoji: string | null) => Promise<void>;
 }) {
+  const [activeAction, setActiveAction] = useState<string | null>(null);
+  const longPress = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPress = () => {
+    if (longPress.current) clearTimeout(longPress.current);
+    longPress.current = null;
+  };
+  useEffect(() => () => cancelPress(), []);
   const messagesById = useMemo(
     () => new Map(messages.map((m) => [m.id, m])),
     [messages],
@@ -48,8 +66,30 @@ export default memo(function MessageTimeline({
           )}
           <div className={"message-row " + m.direction}>
             <div
+              onPointerDown={(e) => {
+                if (platform === "telegram" && e.pointerType === "touch") {
+                  cancelPress();
+                  longPress.current = setTimeout(
+                    () => setActiveAction(m.id),
+                    450,
+                  );
+                }
+              }}
+              onPointerUp={cancelPress}
+              onPointerCancel={cancelPress}
+              onPointerMove={cancelPress}
+              onContextMenu={(e) => {
+                if (platform === "telegram") {
+                  e.preventDefault();
+                  setActiveAction(m.id);
+                }
+              }}
               className={
                 "bubble " +
+                (activeAction === m.id ? "actions-active " : "") +
+                (m.attachments.some((a) => a.kind === "sticker")
+                  ? "sticker-bubble "
+                  : "") +
                 (m.attachments.length === 0 &&
                 !m.error &&
                 !m.text.startsWith("[Вложение Instagram")
@@ -120,16 +160,24 @@ export default memo(function MessageTimeline({
                   )}
                 </div>
               ) : (
-                <p>{m.text}</p>
+                !m.attachments.some(
+                  (a) =>
+                    ["sticker", "voice", "location"].includes(a.kind) &&
+                    a.name === m.text,
+                ) && <p>{m.text}</p>
               )}
               {m.attachments.map((att, j) => (
                 <div key={j}>
-                  {att.kind === "image" ? (
+                  {att.kind === "sticker" ? (
+                    <StickerRenderer attachment={att} />
+                  ) : att.kind === "location" ? (
+                    <LocationCard attachment={att} />
+                  ) : att.kind === "image" ? (
                     <Photo attachment={att} />
                   ) : att.kind === "video" ? (
                     <Video attachment={att} />
                   ) : att.kind === "voice" ? (
-                    <audio controls preload="none" src={att.url} />
+                    <VoicePlayer attachment={att} />
                   ) : (
                     <div className="document-attachment">
                       <strong>
@@ -170,8 +218,21 @@ export default memo(function MessageTimeline({
                   <Reply size={16} />
                 </button>
               )}
+              {platform === "telegram" && m.externalId && (
+                <MessageActions message={m} onEdit={onEdit} onReact={onReact} />
+              )}
+              {!!m.reactions?.length && (
+                <div className="message-reactions">
+                  {m.reactions.map((r) => (
+                    <span key={r.emoji} className={r.chosen ? "chosen" : ""}>
+                      {r.emoji} {r.count}
+                    </span>
+                  ))}
+                </div>
+              )}
               {m.error && <p className="message-error">{m.error}</p>}
               <span className="message-meta">
+                {m.editedAt && <small>изменено</small>}
                 <time>{time(m.createdAt)}</time>
                 {m.direction === "out" && (
                   <>

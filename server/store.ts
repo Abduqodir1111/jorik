@@ -19,6 +19,12 @@ export class Store {
     public changed: () => void = () => {},
     public notifyIncoming: (event?: IncomingNotification) => void = () => {},
   ) {}
+  ordersChanged: () => void = () => this.changed();
+  messageUpdated: (message: Message) => void = () => this.changed();
+  publishMessage(id: string, conversationId: string) {
+    const message = this.messages(conversationId).find((m) => m.id === id);
+    if (message) this.messageUpdated(message);
+  }
   resolveAdapter: (account: Account) => Adapter = adapterFor;
   accounts(): Account[] {
     return (
@@ -48,10 +54,11 @@ export class Store {
   messages(id: string): Message[] {
     const rows = this.db
       .prepare(
-        "SELECT id,conversation_id AS conversationId,external_id AS externalId,direction,text,status,created_at AS createdAt,error,attachments,reply_to_id AS replyToId,read_at AS readAt,reply_to_external_id AS replyExternalId,reply_to_snapshot AS replySnapshot FROM messages WHERE conversation_id=? ORDER BY created_at,rowid",
+        "SELECT id,conversation_id AS conversationId,external_id AS externalId,direction,text,status,created_at AS createdAt,error,attachments,edited_at AS editedAt,reactions,reply_to_id AS replyToId,read_at AS readAt,reply_to_external_id AS replyExternalId,reply_to_snapshot AS replySnapshot FROM messages WHERE conversation_id=? ORDER BY created_at,rowid",
       )
       .all(id) as (Omit<Message, "attachments"> & {
       attachments: string;
+      reactions: string;
       replyExternalId: string | null;
       replySnapshot: string | null;
     })[];
@@ -112,6 +119,7 @@ export class Store {
         ...m,
         replyToId: target?.id || m.replyToId,
         attachments: JSON.parse(m.attachments),
+        reactions: JSON.parse(m.reactions),
         ...(reply ? { reply_to: reply } : {}),
       };
     });

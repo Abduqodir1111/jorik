@@ -1,12 +1,18 @@
-import { courierHeaders, courierRows, type Order } from "../shared/orders";
-export async function courierWorkbook(orders: Order[], date: string) {
+import {
+  generateDeliveryWorksheet,
+  deliveryFilename,
+  type DeliveryWorksheet,
+  type DeliveryFilter,
+} from "../shared/delivery-export";
+import type { Order } from "../shared/orders";
+export async function worksheetBuffer(model: DeliveryWorksheet) {
   const { default: ExcelJS } = await import("exceljs");
   const book = new ExcelJS.Workbook(),
     sheet = book.addWorksheet("Доставки");
-  sheet.addRow(courierHeaders);
-  for (const row of courierRows(orders, date)) sheet.addRow(row);
+  sheet.addRow(model.headers);
+  for (const row of model.rows) sheet.addRow(row);
   sheet.columns.forEach((c, i) => {
-    c.width = [20, 48, 22, 18, 22, 45, 40, 18][i];
+    c.width = model.widths[i];
   });
   sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
   sheet.getRow(1).fill = {
@@ -22,8 +28,20 @@ export async function courierWorkbook(orders: Order[], date: string) {
   sheet.getColumn(3).numFmt = "@";
   return book.xlsx.writeBuffer();
 }
-export async function exportToExcel(orders: Order[], date: string) {
-  const buffer = await courierWorkbook(orders, date);
+export async function courierWorkbook(orders: Order[], date: string) {
+  return worksheetBuffer(
+    generateDeliveryWorksheet(orders, {
+      startDate: date,
+      endDate: date,
+      source: "ALL",
+    }),
+  );
+}
+export async function downloadDelivery(
+  model: DeliveryWorksheet,
+  filter: DeliveryFilter,
+) {
+  const buffer = await worksheetBuffer(model);
   const url = URL.createObjectURL(
     new Blob([new Uint8Array(buffer)], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -31,7 +49,15 @@ export async function exportToExcel(orders: Order[], date: string) {
   );
   const a = document.createElement("a");
   a.href = url;
-  a.download = `Доставки_Storebooks_${date}.xlsx`;
+  a.download = deliveryFilename(filter);
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+export async function exportToExcel(orders: Order[], date: string) {
+  const filter: DeliveryFilter = {
+    startDate: date,
+    endDate: date,
+    source: "ALL",
+  };
+  await downloadDelivery(generateDeliveryWorksheet(orders, filter), filter);
 }

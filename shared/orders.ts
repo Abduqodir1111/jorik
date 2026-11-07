@@ -1,3 +1,4 @@
+import { generateDeliveryWorksheet } from "./delivery-export.js";
 export const districts = [
   "Юнусабад",
   "Мирзо Улугбек",
@@ -41,29 +42,11 @@ export interface Order extends OrderInput {
 export function localDate(now = new Date()) {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
-export const courierHeaders = [
-  "Клиент",
-  "Книга",
-  "Телефон",
-  "Оплата",
-  "Район",
-  "Адрес",
-  "Кординаты",
-  "Статус",
-];
+export { courierHeaders } from "./delivery-export.js";
 export function courierRows(orders: Order[], date: string) {
-  return orders
-    .filter(
-      (o) => o.date === date && ["delivery", "mail"].includes(o.deliveryType) && !o.refused,
-    )
-    .map((o) => [
-      o.source,
-      o.items,
-      o.phone,
-      o.isPaid ? "Оплачено" : o.amount,
-      o.district,
-      o.address,
-      o.coordinates,
-      o.deliveryType === "mail" ? "Почта" : "",
-    ]);
+  return generateDeliveryWorksheet(orders, {
+    startDate: date,
+    endDate: date,
+    source: "ALL",
+  }).rows;
 }

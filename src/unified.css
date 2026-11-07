@@ -233,3 +233,35 @@
 }
 .waiting-filter { display:inline-flex; gap:5px; align-items:center; }
 .waiting-dot { width:5px; height:5px; border-radius:50%; background:currentColor; }
+
+/* Rich messages: shared desktop/mobile layout. */
+.location-card{display:flex;gap:12px;align-items:center;padding:12px;color:inherit;text-decoration:none;border:1px solid currentColor;border-radius:12px;max-width:320px}
+.location-card small{display:block;font-size:11px;margin-top:6px}
+.voice-player{display:flex;align-items:center;gap:10px;width:280px;max-width:100%}
+.voice-player>button{border:0;border-radius:50%;width:40px;height:40px;display:grid;place-items:center;background:var(--accent,#2563eb);color:white;flex-shrink:0}
+.voice-player>div{min-width:0;flex:1}.voice-player input{width:100%}.voice-player small{display:block}.voice-player [role=status]{display:block;font-size:12px}
+.sticker{display:block;width:180px;height:180px;object-fit:contain;max-width:100%}
+.bubble.sticker-bubble{background:transparent!important;box-shadow:none!important;border:0!important;color:var(--ink,#334155)!important}
+.message-actions{display:flex;gap:4px;position:relative;clear:both;margin-top:4px;justify-content:flex-end}
+.message-actions>button{background:transparent;border:0;color:inherit;opacity:.65;padding:5px;border-radius:6px}
+.reaction-picker{display:flex;position:absolute;bottom:100%;right:0;z-index:8;background:var(--surface,#fff);color:var(--ink,#172338);border:1px solid #94a3b8;border-radius:12px;padding:6px;box-shadow:0 4px 18px #0002}
+.reaction-picker button{background:transparent;border:0;padding:7px;font-size:20px}.reaction-picker button[aria-pressed=true]{background:#3b82f640;border-radius:8px}
+.message-reactions{display:flex;gap:4px;flex-wrap:wrap;clear:both;margin-top:5px}.message-reactions span{border-radius:12px;padding:2px 7px;background:#94a3b82a;font-size:13px}.message-reactions .chosen{outline:1px solid #60a5fa}
+@media(hover:hover){.message-actions>button{opacity:0}.bubble:hover .message-actions>button,.bubble:focus-within .message-actions>button{opacity:1}}
+.bubble.actions-active .message-actions>button{opacity:1}
+
+.orders-heading-actions,.day-actions,.delivery-modal-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.day-accordion>header{gap:10px;flex-wrap:wrap;border-radius:10px;background:var(--surface);padding:10px}
+.day-accordion .day-toggle{display:flex;gap:8px;align-items:center;flex:1;justify-content:flex-start;background:none;border:0;min-width:180px;color:var(--ink)}
+.day-toggle h2{margin:0;font-size:15px}.day-toggle>span{font-size:11px;color:var(--muted)}.day-toggle>svg{transition:transform .15s;transform:rotate(-90deg);flex-shrink:0}.day-toggle>svg.is-open{transform:rotate(0)}
+.day-actions button{display:flex;align-items:center;gap:5px;font-size:12px}
+.delivery-preview,.advanced-export{border:1px solid var(--line);border-radius:16px;padding:20px;background:var(--surface);color:var(--ink);max-height:85dvh;max-width:calc(100vw - 24px)}
+.delivery-preview{width:1200px}.advanced-export{width:420px}
+.delivery-preview::backdrop,.advanced-export::backdrop{background:#02061788}
+.delivery-preview>header,.advanced-export>header{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.delivery-preview h2,.advanced-export h2{font-size:18px;margin:0}.delivery-preview small{color:var(--muted)}
+.delivery-modal-actions button,.orders-heading-actions button{display:flex;gap:6px;align-items:center}
+.delivery-preview-scroll{max-height:65dvh;overflow:auto;margin-top:12px}.delivery-preview table{border-collapse:collapse;min-width:960px;width:100%;font-size:12px}
+.delivery-preview th,.delivery-preview td{text-align:left;vertical-align:top;border:1px solid var(--line);padding:8px;white-space:pre-wrap;overflow-wrap:anywhere;min-width:100px;max-width:300px}
+.delivery-preview th{position:sticky;top:0;background:var(--surface)}.advanced-export form{display:grid;gap:14px;margin-top:18px}.advanced-export label{display:grid;gap:6px}.advanced-export input,.advanced-export select{min-width:0;width:100%;font-size:16px}
+@media(max-width:767px){.orders-heading-actions{width:100%}.day-accordion>header{padding:8px}.day-actions{width:100%;justify-content:flex-end}.delivery-preview,.advanced-export{padding:14px}.delivery-modal-actions{width:100%;justify-content:space-between}}

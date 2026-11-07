@@ -1,0 +1,2 @@
+ALTER TABLE messages ADD COLUMN edited_at TEXT;
+ALTER TABLE messages ADD COLUMN reactions TEXT NOT NULL DEFAULT '[]';
