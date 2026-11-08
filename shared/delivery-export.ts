@@ -41,7 +41,7 @@ export function generateDeliveryWorksheet(
     rows: selected.map((o) => [
       o.source,
       o.items,
-      o.phone,
+      [o.phone, o.additionalPhone].filter(Boolean).join(", "),
       o.isPaid ? "Оплачено" : o.amount,
       o.district,
       o.address,

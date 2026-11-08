@@ -25,6 +25,7 @@ export interface OrderInput {
   source: string;
   date: string;
   phone: string;
+  additionalPhone?: string;
   deliveryType: "delivery" | "pickup" | "mail";
   district: string;
   address: string;

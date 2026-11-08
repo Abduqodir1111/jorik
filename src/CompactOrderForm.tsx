@@ -53,6 +53,12 @@ export default function CompactOrderForm({
 }: Props) {
   const [phoneTouched, setPhoneTouched] = useState(false),
     [pasteError, setPasteError] = useState("");
+  const [showAdditional, setShowAdditional] = useState(!!f.additionalPhone);
+  const [additionalTouched, setAdditionalTouched] = useState(false);
+  const additionalInvalid =
+    additionalTouched &&
+    !!f.additionalPhone &&
+    !/^\+998\d{9}$/.test(f.additionalPhone);
   const items = useRef<HTMLTextAreaElement>(null);
   const resize = () => {
     const el = items.current;
@@ -80,6 +86,7 @@ export default function CompactOrderForm({
       onSubmit={(e) => {
         e.preventDefault();
         setPhoneTouched(true);
+        setAdditionalTouched(true);
         onSave();
       }}
     >
@@ -189,7 +196,11 @@ export default function CompactOrderForm({
                 aria-pressed={f.deliveryType === t}
                 onClick={() => onChange({ deliveryType: t })}
               >
-                {t === "delivery" ? "Доставка" : t === "mail" ? "Почта" : "Самовывоз"}
+                {t === "delivery"
+                  ? "Доставка"
+                  : t === "mail"
+                    ? "Почта"
+                    : "Самовывоз"}
               </button>
             ))}
           </div>
@@ -204,6 +215,50 @@ export default function CompactOrderForm({
           onBlur={() => setPhoneTouched(true)}
         />
       </label>
+      {showAdditional ? (
+        <div className="optional-phone-field">
+          <label>
+            Доп. номер
+            <OrderPhone
+              value={f.additionalPhone || "+998"}
+              label="Доп. телефон — 9 цифр"
+              errorId="additional-phone-error"
+              invalid={additionalInvalid}
+              onBlur={() => setAdditionalTouched(true)}
+              onChange={(phone) =>
+                onChange({
+                  additionalPhone: phone === "+998" ? undefined : phone,
+                })
+              }
+            />
+          </label>
+          <button
+            type="button"
+            className="optional-phone-remove"
+            aria-label="Убрать дополнительный номер"
+            onClick={() => {
+              onChange({ additionalPhone: undefined });
+              setShowAdditional(false);
+              setAdditionalTouched(false);
+            }}
+          >
+            <X size={16} />
+          </button>
+          {additionalInvalid && (
+            <small className="orders-error" id="additional-phone-error">
+              Введите 9 цифр дополнительного номера
+            </small>
+          )}
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="add-phone"
+          onClick={() => setShowAdditional(true)}
+        >
+          + Добавить доп. номер
+        </button>
+      )}
       {phoneInvalid && (
         <small className="orders-error" id="order-phone-error">
           Введите 9 цифр после +998

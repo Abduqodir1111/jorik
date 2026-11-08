@@ -43,8 +43,7 @@ import {
   WifiOff,
   X,
   Paperclip,
-  Maximize2,
-  Minimize2,
+  Mail,
   Eye,
   EyeOff,
 } from "lucide-react";
@@ -221,6 +220,50 @@ export default function App() {
     },
     [patchMessage, report],
   );
+  function removeMessage(deleted: {
+    id: string;
+    conversationId: string;
+    preview?: string;
+  }) {
+    const cache = chatCache.current,
+      entry = cache?.get(deleted.conversationId);
+    if (entry)
+      cache?.put(
+        deleted.conversationId,
+        entry.messages.filter((m) => m.id !== deleted.id),
+      );
+    if (selectedRef.current === deleted.conversationId)
+      setMessages((old) => old.filter((m) => m.id !== deleted.id));
+    setReplyTargets((old) => ({
+      ...old,
+      [deleted.conversationId]:
+        old[deleted.conversationId]?.id === deleted.id
+          ? undefined
+          : old[deleted.conversationId],
+    }));
+    setEditing((old) => (old?.message.id === deleted.id ? null : old));
+    setConversations((old) =>
+      old.map((c) =>
+        c.id === deleted.conversationId
+          ? { ...c, preview: cache?.get(c.id)?.messages.at(-1)?.text || "" }
+          : c,
+      ),
+    );
+  }
+  const deleteMessage = useCallback(async (message: Message) => {
+    if (
+      !window.confirm(
+        "Удалить это сообщение у вас и у собеседника в Telegram? Это нельзя отменить.",
+      )
+    )
+      return;
+    const result = await api<{
+      id: string;
+      conversationId: string;
+      preview?: string;
+    }>(`/messages/${message.id}`, "DELETE");
+    removeMessage(result);
+  }, []);
   async function saveEdit() {
     if (!editing || sendLock.current || !editing.text.trim()) return;
     sendLock.current = true;
@@ -246,7 +289,6 @@ export default function App() {
     setReplyTargets((old) => ({ ...old, [message.conversationId]: message }));
     inputRef.current?.focus();
   }, []);
-  const [chatExpanded, setChatExpanded] = useState(false);
   const [localAccess, setLocalAccess] = useState(false);
   const notificationSound = useNotificationSound();
   async function refresh() {
@@ -346,6 +388,11 @@ export default function App() {
       } catch {
         /* Ignore malformed stream events. */
       }
+    });
+    events.addEventListener("message-deleted", (event) => {
+      try {
+        removeMessage(JSON.parse((event as MessageEvent).data));
+      } catch {}
     });
     events.addEventListener("incoming", () => notificationSound.play());
     events.addEventListener("orders-changed", () =>
@@ -578,6 +625,15 @@ export default function App() {
     if (draftTimer.current) clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => void flushDrafts(), 250);
   }
+  const sentFocus = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!sending && sentFocus.current) {
+      const id = sentFocus.current;
+      sentFocus.current = null;
+      if (selectedRef.current === id && page === "inbox")
+        inputRef.current?.focus({ preventScroll: true });
+    }
+  }, [sending, page]);
   async function send(override?: string) {
     if (
       !c ||
@@ -604,6 +660,7 @@ export default function App() {
       setError("В Instagram отправьте фото и текст отдельными сообщениями.");
       return;
     }
+    inputRef.current?.focus({ preventScroll: true });
     sendLock.current = true;
     setSending(true);
     const id = c.id,
@@ -629,6 +686,7 @@ export default function App() {
         preserveDraft: override !== undefined,
       });
       pending.current = null;
+      sentFocus.current = id;
       if (override === undefined) {
         setDrafts((d) => ({ ...d, [id]: "" }));
         setUploads((old) => ({ ...old, [id]: undefined }));
@@ -643,6 +701,11 @@ export default function App() {
       sendLock.current = false;
       setSending(false);
     }
+  }
+  async function markUnread(id: string) {
+    await action(() =>
+      api(`/conversations/${id}/read`, "POST", { unread: true }),
+    );
   }
   async function action(fn: () => Promise<unknown>) {
     try {
@@ -834,7 +897,7 @@ export default function App() {
     );
   return (
     <div
-      className={`app ${orderPanelOpen ? "has-order-panel" : ""} ${page === "inbox" ? "inbox-page" : ""} ${page === "inbox" && selected && chatExpanded ? "chat-expanded" : ""} ${composerFocused && page === "inbox" && selected ? "composer-focused" : ""}`}
+      className={`app ${orderPanelOpen ? "has-order-panel" : ""} ${page === "inbox" ? "inbox-page" : ""} ${composerFocused && page === "inbox" && selected ? "composer-focused" : ""}`}
       style={
         composerFocused && composerViewport
           ? ({
@@ -1101,25 +1164,12 @@ export default function App() {
                     )}
                   </div>
                   <button
-                    className="icon expand-chat"
-                    title={
-                      chatExpanded
-                        ? "Вернуть список диалогов"
-                        : "Развернуть чат"
-                    }
-                    aria-label={
-                      chatExpanded
-                        ? "Вернуть список диалогов"
-                        : "Развернуть чат"
-                    }
-                    aria-pressed={chatExpanded}
-                    onClick={() => setChatExpanded(!chatExpanded)}
+                    className="icon mark-unread"
+                    title="Отметить непрочитанным"
+                    aria-label="Отметить непрочитанным"
+                    onClick={() => void markUnread(c.id)}
                   >
-                    {chatExpanded ? (
-                      <Minimize2 size={20} />
-                    ) : (
-                      <Maximize2 size={20} />
-                    )}
+                    <Mail size={20} />
                   </button>
                   <button
                     className="icon create-order"
@@ -1205,6 +1255,7 @@ export default function App() {
                       onReply={replyToMessage}
                       onEdit={editMessage}
                       onReact={reactMessage}
+                      onDelete={deleteMessage}
                     />
                     <div ref={bottom} />
                   </div>
@@ -1328,7 +1379,7 @@ export default function App() {
                       aria-label="Текст ответа"
                       placeholder="Напишите сообщение…"
                       value={editing?.text ?? drafts[c.id] ?? ""}
-                      disabled={sending}
+                      readOnly={sending}
                       onFocus={() => setComposerFocused(true)}
                       onBlur={() => setComposerFocused(false)}
                       onChange={(e) => {
@@ -1396,6 +1447,7 @@ export default function App() {
                       </button>
                       <button
                         className="send"
+                        onPointerDown={(e) => e.preventDefault()}
                         disabled={
                           sending ||
                           !online ||
@@ -1507,13 +1559,7 @@ export default function App() {
               </dl>
               <button
                 className="secondary"
-                onClick={() =>
-                  action(() =>
-                    api(`/conversations/${c.id}/read`, "POST", {
-                      unread: true,
-                    }),
-                  )
-                }
+                onClick={() => void markUnread(c.id)}
               >
                 Отметить непрочитанным
               </button>

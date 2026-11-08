@@ -203,6 +203,7 @@ export default function Orders({
     !!form &&
     !!form.client.trim() &&
     /^\+998\d{9}$/.test(form.phone) &&
+    (!form.additionalPhone || /^\+998\d{9}$/.test(form.additionalPhone)) &&
     !!form.date &&
     amount !== "" &&
     Number.isFinite(Number(amount)) &&
@@ -221,6 +222,7 @@ export default function Orders({
         source,
         date,
         phone,
+        additionalPhone,
         deliveryType,
         district,
         address,
@@ -234,6 +236,7 @@ export default function Orders({
         source,
         date,
         phone,
+        additionalPhone,
         deliveryType,
         district,
         address,

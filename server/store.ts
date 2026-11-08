@@ -12,7 +12,7 @@ import {
   type IncomingEvent,
   type Adapter,
 } from "./adapters.js";
-const conversationSelect = `SELECT c.id,c.account_id AS accountId,c.external_id AS externalId,c.name,c.username,c.stage,c.unread,(c.unread>0) AS needsReply,c.updated_at AS updatedAt,c.draft,COALESCE((SELECT text FROM messages WHERE conversation_id=c.id ORDER BY created_at DESC,rowid DESC LIMIT 1),'') AS preview FROM conversations c`;
+const conversationSelect = `SELECT c.id,c.account_id AS accountId,c.external_id AS externalId,c.name,c.username,c.stage,c.unread,(c.unread>0) AS needsReply,c.updated_at AS updatedAt,c.draft,COALESCE((SELECT text FROM messages WHERE conversation_id=c.id AND deleted_at IS NULL ORDER BY created_at DESC,rowid DESC LIMIT 1),'') AS preview FROM conversations c`;
 export class Store {
   constructor(
     public db: DB,
@@ -20,6 +20,8 @@ export class Store {
     public notifyIncoming: (event?: IncomingNotification) => void = () => {},
   ) {}
   ordersChanged: () => void = () => this.changed();
+  messageDeleted: (id: string, conversationId: string) => void = () =>
+    this.changed();
   messageUpdated: (message: Message) => void = () => this.changed();
   publishMessage(id: string, conversationId: string) {
     const message = this.messages(conversationId).find((m) => m.id === id);
@@ -54,7 +56,7 @@ export class Store {
   messages(id: string): Message[] {
     const rows = this.db
       .prepare(
-        "SELECT id,conversation_id AS conversationId,external_id AS externalId,direction,text,status,created_at AS createdAt,error,attachments,edited_at AS editedAt,reactions,reply_to_id AS replyToId,read_at AS readAt,reply_to_external_id AS replyExternalId,reply_to_snapshot AS replySnapshot FROM messages WHERE conversation_id=? ORDER BY created_at,rowid",
+        "SELECT id,conversation_id AS conversationId,external_id AS externalId,direction,text,status,created_at AS createdAt,error,attachments,edited_at AS editedAt,reactions,reply_to_id AS replyToId,read_at AS readAt,reply_to_external_id AS replyExternalId,reply_to_snapshot AS replySnapshot FROM messages WHERE conversation_id=? AND deleted_at IS NULL ORDER BY created_at,rowid",
       )
       .all(id) as (Omit<Message, "attachments"> & {
       attachments: string;
@@ -201,7 +203,7 @@ export class Store {
         options.replyToId &&
         !this.db
           .prepare(
-            "SELECT 1 FROM messages WHERE id=? AND conversation_id=? AND external_id IS NOT NULL",
+            "SELECT 1 FROM messages WHERE id=? AND conversation_id=? AND external_id IS NOT NULL AND deleted_at IS NULL",
           )
           .get(options.replyToId, id)
       )

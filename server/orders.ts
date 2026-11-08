@@ -17,6 +17,15 @@ const schema = z
     source: z.string().trim().min(1).max(100),
     date,
     phone: z.string().regex(/^\+998\d{9}$/, "Введите 9 цифр после +998"),
+    additionalPhone: z
+      .union([
+        z.literal(""),
+        z
+          .string()
+          .regex(/^\+998\d{9}$/, "Введите 9 цифр дополнительного номера"),
+      ])
+      .optional()
+      .transform((value) => value || undefined),
     deliveryType: z.enum(["delivery", "pickup", "mail"]),
     district: z.string().max(50),
     address: z.string().trim().max(2000),
@@ -119,11 +128,9 @@ export function registerOrders(app: FastifyInstance, store: Store) {
       )
       .all(...params) as Row[];
     if (rows.length > 10000)
-      return reply
-        .code(400)
-        .send({
-          error: "В отчёте больше 10 000 заказов. Выберите меньший период.",
-        });
+      return reply.code(400).send({
+        error: "В отчёте больше 10 000 заказов. Выберите меньший период.",
+      });
     return rows.map(decode);
   });
   app.post("/api/orders", async (req, reply) => {

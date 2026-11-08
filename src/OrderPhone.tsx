@@ -10,7 +10,11 @@ export default function OrderPhone({
   onChange,
   invalid,
   onBlur,
+  label = "Телефон — 9 цифр",
+  errorId = "order-phone-error",
 }: {
+  label?: string;
+  errorId?: string;
   value: string;
   onChange: (value: string) => void;
   invalid: boolean;
@@ -32,9 +36,9 @@ export default function OrderPhone({
       <input
         ref={input}
         type="tel"
-        aria-label="Телефон — 9 цифр"
+        aria-label={label}
         aria-invalid={invalid}
-        aria-describedby={invalid ? "order-phone-error" : undefined}
+        aria-describedby={invalid ? errorId : undefined}
         inputMode="tel"
         autoComplete="tel-national"
         placeholder="(90) 123-45-67"

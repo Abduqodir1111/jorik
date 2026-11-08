@@ -8,10 +8,11 @@ import React, {
   useState,
   useRef,
   useEffect,
+  useCallback,
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { AlertCircle, Clock, Check, CheckCheck, Reply, X } from "lucide-react";
+import { AlertCircle, Clock, Check, CheckCheck, X } from "lucide-react";
 import type { Account, Message } from "../shared/types";
 import Photo from "./Photo";
 import Video from "./Video";
@@ -31,22 +32,37 @@ export default memo(function MessageTimeline({
   onReply,
   onEdit,
   onReact,
+  onDelete,
 }: {
   messages: Message[];
   platform: Account["platform"];
   dismissed: Record<string, boolean>;
   setDismissed: Dispatch<SetStateAction<Record<string, boolean>>>;
+  onDelete: (message: Message) => Promise<void>;
   onReply: (message: Message) => void;
   onEdit: (message: Message) => void;
   onReact: (message: Message, emoji: string | null) => Promise<void>;
 }) {
-  const [activeAction, setActiveAction] = useState<string | null>(null);
+  const [context, setContext] = useState<{
+    id: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const closeContext = useCallback(() => setContext(null), []);
   const longPress = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const origin = useRef({ x: 0, y: 0 });
+  const suppressClick = useRef(false);
   const cancelPress = () => {
     if (longPress.current) clearTimeout(longPress.current);
     longPress.current = null;
   };
   useEffect(() => () => cancelPress(), []);
+  const activeMessage = context
+    ? messages.find((m) => m.id === context.id)
+    : undefined;
+  useEffect(() => {
+    setContext(null);
+  }, [messages[0]?.conversationId]);
   const messagesById = useMemo(
     () => new Map(messages.map((m) => [m.id, m])),
     [messages],
@@ -66,27 +82,53 @@ export default memo(function MessageTimeline({
           )}
           <div className={"message-row " + m.direction}>
             <div
+              tabIndex={0}
               onPointerDown={(e) => {
-                if (platform === "telegram" && e.pointerType === "touch") {
-                  cancelPress();
-                  longPress.current = setTimeout(
-                    () => setActiveAction(m.id),
-                    450,
-                  );
-                }
+                suppressClick.current = false;
+                if (e.pointerType !== "touch") return;
+                cancelPress();
+                origin.current = { x: e.clientX, y: e.clientY };
+                const { clientX: x, clientY: y } = e;
+                longPress.current = setTimeout(() => {
+                  suppressClick.current = true;
+                  setContext({ id: m.id, x, y });
+                }, 500);
               }}
               onPointerUp={cancelPress}
               onPointerCancel={cancelPress}
-              onPointerMove={cancelPress}
-              onContextMenu={(e) => {
-                if (platform === "telegram") {
+              onPointerMove={(e) => {
+                if (
+                  Math.hypot(
+                    e.clientX - origin.current.x,
+                    e.clientY - origin.current.y,
+                  ) > 8
+                )
+                  cancelPress();
+              }}
+              onClickCapture={(e) => {
+                if (suppressClick.current) {
                   e.preventDefault();
-                  setActiveAction(m.id);
+                  e.stopPropagation();
+                  suppressClick.current = false;
+                }
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                cancelPress();
+                setContext({ id: m.id, x: e.clientX, y: e.clientY });
+              }}
+              onKeyDown={(e) => {
+                if (
+                  e.key === "ContextMenu" ||
+                  (e.shiftKey && e.key === "F10")
+                ) {
+                  e.preventDefault();
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setContext({ id: m.id, x: r.left + 10, y: r.top + 10 });
                 }
               }}
               className={
                 "bubble " +
-                (activeAction === m.id ? "actions-active " : "") +
                 (m.attachments.some((a) => a.kind === "sticker")
                   ? "sticker-bubble "
                   : "") +
@@ -206,21 +248,6 @@ export default memo(function MessageTimeline({
                   )}
                 </div>
               ))}
-              {m.externalId && (
-                <button
-                  className="reply-action"
-                  aria-label="Ответить на сообщение"
-                  title="Ответить"
-                  onClick={() => {
-                    onReply(m);
-                  }}
-                >
-                  <Reply size={16} />
-                </button>
-              )}
-              {platform === "telegram" && m.externalId && (
-                <MessageActions message={m} onEdit={onEdit} onReact={onReact} />
-              )}
               {!!m.reactions?.length && (
                 <div className="message-reactions">
                   {m.reactions.map((r) => (
@@ -268,6 +295,20 @@ export default memo(function MessageTimeline({
           </div>
         </React.Fragment>
       ))}
+      {context && activeMessage && (
+        <MessageActions
+          key={context.id}
+          message={activeMessage}
+          platform={platform}
+          x={context.x}
+          y={context.y}
+          onClose={closeContext}
+          onReply={onReply}
+          onEdit={onEdit}
+          onReact={onReact}
+          onDelete={onDelete}
+        />
+      )}
     </>
   );
 });

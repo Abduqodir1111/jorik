@@ -89,6 +89,12 @@ export default memo(function OrderCard({
           <Phone size={14} aria-hidden="true" />
           {phone}
         </a>
+        {order.additionalPhone && (
+          <a href={`tel:${order.additionalPhone}`}>
+            <Phone size={14} aria-hidden="true" />
+            {order.additionalPhone} <small>доп.</small>
+          </a>
+        )}
         <div className="order-card-logistics">
           <span className="order-card-type">
             <Icon size={14} aria-hidden="true" />

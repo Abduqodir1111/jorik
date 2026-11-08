@@ -453,3 +453,26 @@
  .compact-order-drawer .compact-order-form input:not([type="checkbox"]):not([type="radio"]),.compact-order-drawer .compact-order-form select { font-size:16px; }
 }
 .compact-order-drawer .compact-order-form > footer { bottom:0; }
+
+/* Three receiving options need enough space beside the date or a full row. */
+.compact-order-form .compact-grid.order-date-type {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+}
+.compact-order-form .type-segments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  min-width: 0;
+  align-items: stretch;
+}
+.compact-order-form .type-segments button {
+  min-width: 0;
+  width: 100%;
+  padding: 3px 4px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.2;
+}
+.compact-order-form .add-phone { justify-self:start; padding:0; color:var(--accent); font-size:12px; }
+.optional-phone-field { position:relative; padding-right:30px; min-width:0; }
+.optional-phone-remove { position:absolute; right:0; top:24px; padding:5px; color:var(--muted); }

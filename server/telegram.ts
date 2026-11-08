@@ -32,11 +32,7 @@ import { NewMessage, Raw } from "teleproto/events";
 import bigInt from "big-integer";
 import { createHash, randomUUID } from "node:crypto";
 import type { Account, Message } from "../shared/types.js";
-import {
-  DemoAdapter,
-  SendFailure,
-  type Adapter,
-} from "./adapters.js";
+import { DemoAdapter, SendFailure, type Adapter } from "./adapters.js";
 import type { Store } from "./store.js";
 import { seal, unseal } from "./secrets.js";
 export type TelegramOptions = {
@@ -898,7 +894,7 @@ export class TelegramIntegration {
   private actionTarget(messageId: string) {
     const row = this.store.db
       .prepare(
-        "SELECT m.*,c.external_id AS peer_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND c.account_id=?",
+        "SELECT m.*,c.external_id AS peer_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND c.account_id=? AND m.deleted_at IS NULL",
       )
       .get(messageId, this.accountId) as
       | {
@@ -977,6 +973,37 @@ export class TelegramIntegration {
       this.actionLocks.delete(messageId);
     }
   }
+  async deleteMessage(messageId: string) {
+    const row = this.actionTarget(messageId);
+    if (row.direction !== "out" || row.status !== "sent")
+      throw new Error(
+        "Удалить можно только своё отправленное сообщение Telegram.",
+      );
+    if (this.actionLocks.has(messageId))
+      throw new Error("Операция с сообщением уже выполняется.");
+    this.actionLocks.add(messageId);
+    try {
+      await this.client!.invoke(
+        new Api.messages.DeleteMessages({
+          id: [Number(row.external_id)],
+          revoke: true,
+        }),
+      );
+      this.store.db
+        .prepare("UPDATE messages SET deleted_at=? WHERE id=?")
+        .run(new Date().toISOString(), messageId);
+      this.store.messageDeleted(messageId, row.conversation_id);
+      return {
+        id: messageId,
+        conversationId: row.conversation_id,
+        preview: this.store.conversation(row.conversation_id).preview,
+      };
+    } catch (e) {
+      throw new Error(safeTelegramError(e));
+    } finally {
+      this.actionLocks.delete(messageId);
+    }
+  }
   async react(messageId: string, emoji: string | null) {
     const row = this.actionTarget(messageId);
     try {
@@ -1037,7 +1064,7 @@ export class TelegramIntegration {
   private async loadSpecialMedia(messageId: string, compatible: boolean) {
     const row = this.store.db
       .prepare(
-        "SELECT m.external_id,m.attachments,c.external_id AS peer_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND c.account_id=?",
+        "SELECT m.external_id,m.attachments,c.external_id AS peer_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND c.account_id=? AND m.deleted_at IS NULL",
       )
       .get(messageId, this.accountId) as
       { external_id: string; attachments: string; peer_id: string } | undefined;
@@ -1178,7 +1205,7 @@ export class TelegramIntegration {
       video === "document" ? documentMime : video ? videoMime : imageMime;
     const row = this.store.db
       .prepare(
-        "SELECT m.external_id,c.external_id AS peer_id,m.attachments FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND c.account_id=?",
+        "SELECT m.external_id,c.external_id AS peer_id,m.attachments FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND c.account_id=? AND m.deleted_at IS NULL",
       )
       .get(messageId, this.accountId) as
       { external_id: string; peer_id: string; attachments: string } | undefined;

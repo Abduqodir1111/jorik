@@ -103,6 +103,12 @@ export async function createApp(opts: {
     for (const client of clients)
       client.write("event: orders-changed\ndata: changed\n\n");
   };
+  store.messageDeleted = (id, conversationId) => {
+    for (const client of clients)
+      client.write(
+        `event: message-deleted\ndata: ${JSON.stringify({ id, conversationId, preview: store.conversation(conversationId).preview })}\n\n`,
+      );
+  };
   store.messageUpdated = (message) => {
     const payload = `event: message-update\ndata: ${JSON.stringify(message)}\n\n`;
     for (const client of clients) client.write(payload);
@@ -413,11 +419,23 @@ export async function createApp(opts: {
       );
     },
   );
+  app.delete<{ Params: { id: string } }>("/api/messages/:id", async (req) => {
+    const row = db
+      .prepare(
+        "SELECT c.account_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=? AND m.deleted_at IS NULL",
+      )
+      .get(req.params.id) as { account_id: string } | undefined;
+    if (!row || !row.account_id.startsWith("telegram-"))
+      throw new Error(
+        "Удаление доступно только для отправленных сообщений Telegram.",
+      );
+    return tg(row.account_id).deleteMessage(req.params.id);
+  });
   app.put<{ Params: { id: string } }>(
     "/api/messages/:id/reaction",
     async (req) => {
       const body = z
-        .object({ emoji: z.enum(["👍", "❤️", "🔥", "👏"]).nullable() })
+        .object({ emoji: z.enum(["👍", "❤️", "🔥", "😂", "👏"]).nullable() })
         .strict()
         .parse(req.body);
       const row = db
@@ -638,7 +656,7 @@ export async function createApp(opts: {
     const { q } = z.object({ q: z.string().max(200) }).parse(req.query);
     const rows = db
       .prepare(
-        "SELECT DISTINCT conversation_id AS id FROM messages WHERE instr(search_fold(text), ?) > 0",
+        "SELECT DISTINCT conversation_id AS id FROM messages WHERE deleted_at IS NULL AND instr(search_fold(text), ?) > 0",
       )
       .all(q.toLocaleLowerCase("ru")) as { id: string }[];
     return { ids: rows.map((row) => row.id) };
