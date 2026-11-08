@@ -110,3 +110,85 @@
 .inbox-page .bubble.text-only .message-meta { display:inline-flex; float:right; margin:5px 0 -2px 12px; }
 .inbox-page .out .bubble:not(.failed) .message-meta { color:#dbeafe; }
 .inbox-page .bubble .message-meta .read-check { color:inherit; }
+
+/* Soft Slate: dark-theme colors only; existing geometry and behavior stay intact. */
+:root.dark {
+  --bg-app: #0f141c;
+  --bg-nav: #0b0f16;
+  --bg-sidebar: #131923;
+  --bg-chat: #0f141c;
+  --bg-elevated: #1c2533;
+  --bg-active: rgba(56, 189, 248, 0.10);
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --text-primary: #e6edf5;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --bubble-out-bg: #1e2d44;
+  --bubble-out-border: rgba(96, 165, 250, 0.22);
+  --bubble-out-text: #e8f0fe;
+  --bubble-in-bg: #18212f;
+  --bubble-in-border: rgba(255, 255, 255, 0.07);
+  --bubble-in-text: #e2e8f0;
+  --canvas: var(--bg-app);
+  --surface: var(--bg-sidebar);
+  --hover: var(--bg-elevated);
+  --ink: var(--text-primary);
+  --muted: var(--text-secondary);
+  --line: var(--border-subtle);
+  --accent: #60a5fa;
+}
+.dark .app .sidebar { background: var(--bg-nav); border-color: var(--border-subtle); }
+.dark .app .conversation-list,
+.dark .inbox-page .chat-header,
+.dark .inbox-page .chat-context { background: var(--bg-sidebar); color: var(--text-primary); }
+.dark .inbox-page .chat,
+.dark .inbox-page .messages { background: var(--bg-chat); }
+.dark .app .rail-logo,
+.dark .app .rail-button.active,
+.dark .inbox-page .send,
+.dark .app .primary,
+.dark .voice-player > button { background: var(--bubble-out-bg); color: var(--bubble-out-text); border-color: var(--bubble-out-border); }
+.dark .app .rail-button:hover { background: var(--bg-elevated); }
+.dark .app .rail-logo span { color: var(--text-secondary); }
+.dark .inbox-page .conversation.selected,
+.dark .inbox-page .inbox-filters button[aria-pressed="true"] { background: var(--bg-active); color: var(--text-primary); border-color: var(--bubble-out-border); }
+.dark .inbox-page .conversation:hover { background: var(--bg-elevated); }
+.dark .conversation.is-unread .conversation-title b,
+.dark .conversation.is-unread .preview,
+.dark .conversation.is-unread .preview > span,
+.dark .conversation.is-unread .preview em { color: var(--text-primary); }
+.dark .inbox-page .search,
+.dark input,
+.dark select,
+.dark textarea,
+.dark .inbox-page .composer textarea,
+.dark .inbox-page .quick-replies button,
+.dark .compact-phone,
+.dark .compact-amount,
+.dark .location-input,
+.dark .type-segments,
+.dark .font-options,
+.dark .date-separator span { background: var(--bg-elevated); border-color: var(--border-subtle); }
+.dark input::placeholder,
+.dark textarea::placeholder { color: var(--text-muted); }
+.dark .order-drawer,
+.dark .order-history { --surface: var(--bg-sidebar); }
+.dark .order-drawer input,
+.dark .order-drawer select,
+.dark .order-drawer textarea { background: var(--bg-elevated) !important; }
+.dark .inbox-page .in .bubble { background: var(--bubble-in-bg); border-color: var(--bubble-in-border); color: var(--bubble-in-text); }
+.dark .inbox-page .out .bubble { background: var(--bubble-out-bg); border-color: var(--bubble-out-border); color: var(--bubble-out-text); }
+.dark .inbox-page .bubble .message-meta,
+.dark .inbox-page .out .bubble:not(.failed) .message-meta,
+.dark .conversation .conversation-title time,
+.dark .conversation.is-unread .conversation-title time,
+.dark .composer-bottom { color: var(--text-muted); }
+.dark .message-quote { background: var(--bg-active); border-left-color: var(--bubble-out-border); }
+.dark .message-quote strong { color: var(--text-secondary); }
+.dark .message-row.out .message-quote { background: var(--bg-active); border-left-color: var(--bubble-out-border); }
+.dark .message-row.out .message-quote strong { color: var(--bubble-out-text); }
+.dark .reply-account > b { background: var(--bg-elevated); }
+.dark .inbox-page .chat-header .create-order { color: var(--text-primary); }
+.dark .out .bubble .message-error { color: var(--text-primary); }
+.dark .unread { background: var(--bubble-out-bg); color: var(--bubble-out-text); }
+.dark .list-heading h1 > span { background: var(--bg-elevated); color: var(--text-primary); }
