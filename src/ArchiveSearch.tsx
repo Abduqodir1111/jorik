@@ -134,47 +134,6 @@ export default function ArchiveSearch({
       controller.abort();
     };
   }, [job?.id, job?.state]);
-  async function link(id: string) {
-    const win = window.open("about:blank", "_blank");
-    if (!win) {
-      setError("Разрешите открытие новой вкладки для Jorik.");
-      return;
-    }
-    win.opener = null;
-    try {
-      win.document.body.textContent = "Готовим ссылку на папку…";
-      let result = await request<{
-        url?: string;
-        taskId?: string;
-        state?: string;
-        error?: string;
-      }>("/link", { id });
-      const taskId = result.taskId,
-        deadline = Date.now() + 120000;
-      while (!result.url && taskId && Date.now() < deadline && !win.closed) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        result = await request<{
-          url?: string;
-          state?: string;
-          error?: string;
-        }>("/links/" + taskId);
-        if (result.state === "error")
-          throw new Error(result.error || "Не удалось открыть папку");
-      }
-      if (win.closed) return;
-      if (!result.url)
-        throw new Error(
-          "DSM долго готовит ссылку. Повторите открытие чуть позже.",
-        );
-      const u = new URL(result.url);
-      if (!["https:", "http:"].includes(u.protocol))
-        throw new Error("Недопустимая ссылка");
-      win.location.href = u.href;
-    } catch (e) {
-      win.close();
-      setError(e instanceof Error ? e.message : "Не удалось открыть ссылку");
-    }
-  }
   async function send(entry: ArchiveEntry) {
     if (!conversationId || lock.current) return;
     lock.current = true;
@@ -339,10 +298,14 @@ export default function ArchiveSearch({
                   {e.source.toUpperCase()}
                 </span>
                 <div className="archive-actions">
-                  <button onClick={() => void link(e.id)}>
+                  <a
+                    href={"/archive-open.html?id=" + encodeURIComponent(e.id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     <ExternalLink size={14} />
                     {e.type === "folder" ? "Открыть" : "Предпросмотр"}
-                  </button>
+                  </a>
                   {e.type === "video" && (
                     <button
                       disabled={!conversationId || busy}
