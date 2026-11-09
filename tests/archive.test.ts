@@ -87,6 +87,14 @@ test("Archive API auth, persistent idempotency, deferred preparation, preserved 
       preparations++;
       return { file, size: 8, duration: 1, width: 320, height: 240 };
     };
+    await archive.rebuild();
+    await app.inject("/api/archive/search?q=test");
+    await archive.tick();
+    assert.equal(
+      preparations,
+      0,
+      "Indexing, search and idle worker must not prepare videos",
+    );
     const before = (db.prepare("SELECT count(*) n FROM messages").get() as any)
       .n;
     db.prepare("UPDATE conversations SET draft='не потерять' WHERE id=?").run(
@@ -288,7 +296,21 @@ test(
       assert.ok(result.size < 18 * 1024 * 1024);
       assert.ok(result.file.startsWith(path.join(dir, "cache")));
       assert.equal((await fs.stat(file)).mtimeMs, before.mtimeMs);
+      const cachedStat = await fs.stat(result.file);
       assert.equal((await video.prepare(id)).file, result.file);
+      await video.close();
+      // A new instance must use the persisted file without invoking an encoder.
+      const restarted = new ArchiveVideo(
+        index,
+        path.join(dir, "cache"),
+        "/encoder-must-not-run",
+      );
+      try {
+        assert.equal((await restarted.prepare(id)).file, result.file);
+        assert.equal((await fs.stat(result.file)).mtimeMs, cachedStat.mtimeMs);
+      } finally {
+        await restarted.close();
+      }
       assert.equal((await fs.readdir(root)).length, 1);
     } finally {
       await video.close();

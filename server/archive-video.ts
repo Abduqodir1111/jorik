@@ -1,5 +1,3 @@
-import os from "node:os";
-import { setTimeout as delay } from "node:timers/promises";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -25,7 +23,6 @@ export class ArchiveVideo {
   private active = false;
   private stopped = false;
   private running?: Promise<void>;
-  private background?: Promise<void>;
   private controller = new AbortController();
   constructor(
     readonly index: ArchiveIndex,
@@ -60,33 +57,6 @@ export class ArchiveVideo {
     } catch {
       return false;
     }
-  }
-  warm() {
-    if (this.background || this.stopped) return;
-    this.background = (async () => {
-      for (const e of this.index.list()) {
-        if (this.stopped) break;
-        while (
-          !this.stopped &&
-          process.platform === "linux" &&
-          (os.loadavg()[0] > 2.5 || !(await this.hostHasHeadroom()))
-        ) {
-          try {
-            await delay(30000, undefined, {
-              signal: this.controller.signal,
-              ref: false,
-            });
-          } catch {
-            break;
-          }
-        }
-        if (this.stopped) break;
-        if (e.type === "video") await this.prepare(e.id).catch(() => {});
-        // Only one background item is queued; operator jobs can jump ahead.
-      }
-    })().finally(() => {
-      this.background = undefined;
-    });
   }
   private async drain() {
     this.active = true;
@@ -313,6 +283,5 @@ export class ArchiveVideo {
     for (const j of this.queue.splice(0))
       j.reject(new Error("Подготовка остановлена"));
     await this.running?.catch(() => {});
-    await this.background?.catch(() => {});
   }
 }

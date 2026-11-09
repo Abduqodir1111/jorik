@@ -48,7 +48,6 @@ export const config = {
       password: process.env.ARCHIVE_DSM_PASSWORD || "",
     },
     opdsBase: process.env.FLIBUSTA_BASE_URL || "https://flibusta.is",
-    warmVideos: process.env.ARCHIVE_WARM_VIDEOS === "true",
   },
   push: {
     publicKey: process.env.VAPID_PUBLIC_KEY,

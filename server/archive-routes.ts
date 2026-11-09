@@ -15,7 +15,6 @@ export interface ArchiveOptions {
   roots: ArchiveRoot[];
   synology?: SynologyOptions;
   opdsBase?: string;
-  warmVideos?: boolean;
 }
 export function registerArchive(
   app: FastifyInstance,
@@ -124,7 +123,6 @@ export function registerArchive(
             .save(path.join(dataDir, "archive-index.json"))
             .catch(() => {});
       });
-      if (index.updatedAt && opts?.warmVideos && !stopped) video.warm();
     })().finally(() => {
       scan = undefined;
     });
@@ -338,7 +336,6 @@ export function registerArchive(
             Date.now() - Date.parse(index.updatedAt) > 86400000
           )
             await rebuild();
-          else if (opts.warmVideos && !stopped) video.warm();
           if (!stopped) nextScan();
         })();
       }, 1500);
