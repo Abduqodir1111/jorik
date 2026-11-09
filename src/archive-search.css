@@ -29,14 +29,17 @@
   padding: 16px;
   gap: 8px;
 }
-.archive-search small {
+.archive-search small,
+.archive-browser small {
   display: block;
   color: var(--muted, #64748b);
   font-size: 12px;
 }
 .archive-search button,
 .archive-search a,
-.archive-search select {
+.archive-search select,
+.archive-browser button,
+.archive-browser a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -51,7 +54,8 @@
   font-size: 13px;
   cursor: pointer;
 }
-.archive-search button:disabled {
+.archive-search button:disabled,
+.archive-browser button:disabled {
   opacity: 0.5;
   cursor: default;
 }

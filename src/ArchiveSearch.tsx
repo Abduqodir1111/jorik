@@ -200,193 +200,203 @@ export default function ArchiveSearch({
     unknown: "Результат неизвестен — проверьте чат у провайдера",
   };
   return (
-    <section
-      className={
-        "archive-search " +
-        (fullPage ? "archive-page" : "archive-widget") +
-        (open ? " is-open" : "")
-      }
-      aria-label="Поиск по архиву"
-    >
-      {!fullPage && !open ? (
-        <button className="archive-launch" onClick={() => setOpen(true)}>
-          <Search size={18} />
-          Поиск по архиву
-        </button>
-      ) : (
-        <>
-          <header>
-            <div>
-              <b>Поиск по архиву</b>
-              <small>Книги, манга и видеообзоры</small>
-            </div>
-            {!fullPage && (
-              <button aria-label="Закрыть поиск" onClick={() => setOpen(false)}>
-                <X size={18} />
-              </button>
-            )}
-          </header>
-          <label className="archive-input">
+    <>
+      <section
+        className={
+          "archive-search " +
+          (fullPage ? "archive-page" : "archive-widget") +
+          (open ? " is-open" : "")
+        }
+        aria-label="Поиск по архиву"
+      >
+        {!fullPage && !open ? (
+          <button className="archive-launch" onClick={() => setOpen(true)}>
             <Search size={18} />
-            <input
-              aria-label="Название в архиве"
-              placeholder="Название книги или обзора…"
-              value={q}
-              onChange={(e) => {
-                setQ(e.target.value);
-                setBookQuery("");
-              }}
-            />
-          </label>
-          <div className="archive-status">
-            {status?.indexing
-              ? "Обновляем индекс…"
-              : status?.error ||
-                (!status?.enabled
-                  ? "Архив не подключён"
-                  : status.updatedAt
-                    ? `В архиве: ${status.count}`
-                    : "Подготавливаем индекс…")}
-            <button
-              title="Обновить индекс"
-              aria-label="Обновить индекс"
-              disabled={!status?.enabled || status.indexing}
-              onClick={() =>
-                void request("/reindex", {})
-                  .then(() =>
-                    setStatus((s) => (s ? { ...s, indexing: true } : s)),
-                  )
-                  .catch((e) => setError(e.message))
-              }
-            >
-              <RefreshCw size={14} />
-            </button>
-          </div>
-          {conversationId && (
-            <small className="archive-target">Отправка в: {chatName}</small>
-          )}
-          {error && (
-            <p className="archive-error" role="alert">
-              {error}
-            </p>
-          )}
-          {job && (
-            <p className={"archive-job " + job.state} role="status">
-              {labels[job.state]} · {target}
-              {job.error && <small>{job.error}</small>}
-            </p>
-          )}
-          <div className="archive-results" aria-busy={loading}>
-            {loading && (
-              <p className="archive-hint">
-                <Loader size={16} /> Ищем…
+            Поиск по архиву
+          </button>
+        ) : (
+          <>
+            <header>
+              <div>
+                <b>Поиск по архиву</b>
+                <small>Книги, манга и видеообзоры</small>
+              </div>
+              {!fullPage && (
+                <button
+                  aria-label="Закрыть поиск"
+                  onClick={() => setOpen(false)}
+                >
+                  <X size={18} />
+                </button>
+              )}
+            </header>
+            <label className="archive-input">
+              <Search size={18} />
+              <input
+                aria-label="Название в архиве"
+                placeholder="Название книги или обзора…"
+                value={q}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setBookQuery("");
+                }}
+              />
+            </label>
+            <div className="archive-status">
+              {status?.indexing
+                ? "Обновляем индекс…"
+                : status?.error ||
+                  (!status?.enabled
+                    ? "Архив не подключён"
+                    : status.updatedAt
+                      ? `В архиве: ${status.count}`
+                      : "Подготавливаем индекс…")}
+              <button
+                title="Обновить индекс"
+                aria-label="Обновить индекс"
+                disabled={!status?.enabled || status.indexing}
+                onClick={() =>
+                  void request("/reindex", {})
+                    .then(() =>
+                      setStatus((s) => (s ? { ...s, indexing: true } : s)),
+                    )
+                    .catch((e) => setError(e.message))
+                }
+              >
+                <RefreshCw size={14} />
+              </button>
+            </div>
+            {conversationId && (
+              <small className="archive-target">Отправка в: {chatName}</small>
+            )}
+            {error && (
+              <p className="archive-error" role="alert">
+                {error}
               </p>
             )}
-            {entries.map((e) => (
-              <article key={e.id}>
-                <div className="archive-entry-title">
-                  {e.type === "folder" ? (
-                    <Folder size={18} />
-                  ) : (
-                    <Video size={18} />
-                  )}
-                  <b>
-                    {e.type === "video"
-                      ? e.name.replace(/\.(mp4|mov)$/i, "")
-                      : e.name}
-                  </b>
-                </div>
-                <span className={"archive-source " + e.source.toLowerCase()}>
-                  {e.source.toUpperCase()}
-                </span>
-                <div className="archive-actions">
-                  <button onClick={() => setPreview(e)}>
-                    {e.type === "folder" ? (
-                      <Folder size={14} />
-                    ) : (
-                      <Video size={14} />
-                    )}
-                    {e.type === "folder" ? "Открыть" : "Предпросмотр"}
-                  </button>
-                  <a
-                    href={"/archive-open.html?id=" + encodeURIComponent(e.id)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <ExternalLink size={14} />
-                    Поделиться ссылкой
-                  </a>
-                  {e.type === "video" && (
-                    <button
-                      disabled={!conversationId || busy}
-                      onClick={() => void send(e)}
-                    >
-                      <Send size={14} />В чат
-                    </button>
-                  )}
-                </div>
-              </article>
-            ))}
-            {!loading && q.trim().length >= 2 && !entries.length && (
-              <p className="archive-hint">В локальном архиве совпадений нет.</p>
+            {job && (
+              <p className={"archive-job " + job.state} role="status">
+                {labels[job.state]} · {target}
+                {job.error && <small>{job.error}</small>}
+              </p>
             )}
-            {q.trim().length >= 2 && (
-              <button
-                className="archive-catalog"
-                disabled={loading}
-                onClick={() => void findBooks()}
-              >
-                Найти во Флибусте
-              </button>
-            )}
-            {bookQuery === q.trim() &&
-              books.map((b, i) => {
-                const format =
-                  b.formats.find((f) => f.downloadPath === formats[b.id]) ||
-                  b.formats[0];
-                return (
-                  <article key={b.id + ":" + i}>
-                    <b>{b.title}</b>
-                    <small>{b.author}</small>
-                    <div className="archive-actions">
-                      <select
-                        aria-label={"Формат: " + b.title}
-                        value={format.downloadPath}
-                        onChange={(e) =>
-                          setFormats((s) => ({ ...s, [b.id]: e.target.value }))
-                        }
-                      >
-                        {b.formats.map((f) => (
-                          <option key={f.downloadPath} value={f.downloadPath}>
-                            {f.ext.toUpperCase()}
-                          </option>
-                        ))}
-                      </select>
-                      <a
-                        href={
-                          "/api/archive/flibusta/download?path=" +
-                          encodeURIComponent(format.downloadPath) +
-                          "&title=" +
-                          encodeURIComponent(b.author + " - " + b.title)
-                        }
-                      >
-                        <Download size={14} /> Скачать
-                      </a>
-                    </div>
-                  </article>
-                );
-              })}
-            {!loading &&
-              bookQuery === q.trim() &&
-              !books.length &&
-              bookQuery && (
+            <div className="archive-results" aria-busy={loading}>
+              {loading && (
                 <p className="archive-hint">
-                  Каталог не вернул книг с доступными форматами.
+                  <Loader size={16} /> Ищем…
                 </p>
               )}
-          </div>
-        </>
-      )}
+              {entries.map((e) => (
+                <article key={e.id}>
+                  <div className="archive-entry-title">
+                    {e.type === "folder" ? (
+                      <Folder size={18} />
+                    ) : (
+                      <Video size={18} />
+                    )}
+                    <b>
+                      {e.type === "video"
+                        ? e.name.replace(/\.(mp4|mov)$/i, "")
+                        : e.name}
+                    </b>
+                  </div>
+                  <span className={"archive-source " + e.source.toLowerCase()}>
+                    {e.source.toUpperCase()}
+                  </span>
+                  <div className="archive-actions">
+                    <button onClick={() => setPreview(e)}>
+                      {e.type === "folder" ? (
+                        <Folder size={14} />
+                      ) : (
+                        <Video size={14} />
+                      )}
+                      {e.type === "folder" ? "Открыть" : "Предпросмотр"}
+                    </button>
+                    <a
+                      href={"/archive-open.html?id=" + encodeURIComponent(e.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <ExternalLink size={14} />
+                      Поделиться ссылкой
+                    </a>
+                    {e.type === "video" && (
+                      <button
+                        disabled={!conversationId || busy}
+                        onClick={() => void send(e)}
+                      >
+                        <Send size={14} />В чат
+                      </button>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {!loading && q.trim().length >= 2 && !entries.length && (
+                <p className="archive-hint">
+                  В локальном архиве совпадений нет.
+                </p>
+              )}
+              {q.trim().length >= 2 && (
+                <button
+                  className="archive-catalog"
+                  disabled={loading}
+                  onClick={() => void findBooks()}
+                >
+                  Найти во Флибусте
+                </button>
+              )}
+              {bookQuery === q.trim() &&
+                books.map((b, i) => {
+                  const format =
+                    b.formats.find((f) => f.downloadPath === formats[b.id]) ||
+                    b.formats[0];
+                  return (
+                    <article key={b.id + ":" + i}>
+                      <b>{b.title}</b>
+                      <small>{b.author}</small>
+                      <div className="archive-actions">
+                        <select
+                          aria-label={"Формат: " + b.title}
+                          value={format.downloadPath}
+                          onChange={(e) =>
+                            setFormats((s) => ({
+                              ...s,
+                              [b.id]: e.target.value,
+                            }))
+                          }
+                        >
+                          {b.formats.map((f) => (
+                            <option key={f.downloadPath} value={f.downloadPath}>
+                              {f.ext.toUpperCase()}
+                            </option>
+                          ))}
+                        </select>
+                        <a
+                          href={
+                            "/api/archive/flibusta/download?path=" +
+                            encodeURIComponent(format.downloadPath) +
+                            "&title=" +
+                            encodeURIComponent(b.author + " - " + b.title)
+                          }
+                        >
+                          <Download size={14} /> Скачать
+                        </a>
+                      </div>
+                    </article>
+                  );
+                })}
+              {!loading &&
+                bookQuery === q.trim() &&
+                !books.length &&
+                bookQuery && (
+                  <p className="archive-hint">
+                    Каталог не вернул книг с доступными форматами.
+                  </p>
+                )}
+            </div>
+          </>
+        )}
+      </section>
       {preview && (
         <ArchiveBrowser
           key={preview.id}
@@ -406,6 +416,6 @@ export default function ArchiveSearch({
           onClose={() => setPreview(null)}
         />
       )}
-    </section>
+    </>
   );
 }
