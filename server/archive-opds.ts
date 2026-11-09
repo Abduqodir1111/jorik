@@ -21,29 +21,54 @@ export class ArchiveOPDS {
     )
       throw new Error("Некорректный адрес OPDS");
     // The base is server configuration only; clients cannot choose a host or redirect destination.
-    const addresses = await lookup(base.hostname, { all: true });
-    if (
-      !addresses.length ||
-      addresses.some(({ address }) =>
-        /^(127\.|10\.|192\.168\.|169\.254\.|0\.|172\.(1[6-9]|2\d|3[01])\.|::|fc|fd|fe80)/i.test(
-          address,
-        ),
+    let target = new URL(route, base);
+    for (let hop = 0; hop < 4; hop++) {
+      const allowedHost =
+        target.hostname === base.hostname ||
+        (base.hostname === "flibusta.is" &&
+          target.hostname === "static.flibusta.is");
+      if (
+        !allowedHost ||
+        target.protocol !== "https:" ||
+        target.username ||
+        target.password ||
+        target.port
       )
-    )
-      throw new Error("Адрес OPDS недоступен");
-    const response = await this.fetcher(new URL(route, base), {
-      signal: AbortSignal.timeout(8000),
-      redirect: "error",
-      headers: {
-        Accept: route.startsWith("/opds/")
-          ? "application/atom+xml"
-          : "application/octet-stream",
-      },
-    });
-    if (!response.ok || !response.body)
-      throw new Error("Каталог сейчас недоступен. Повторите позже.");
-    return response;
+        throw new Error("Недопустимое перенаправление каталога");
+      const addresses = await lookup(target.hostname, { all: true });
+      if (
+        !addresses.length ||
+        addresses.some(({ address }) =>
+          /^(127\.|10\.|192\.168\.|169\.254\.|0\.|172\.(1[6-9]|2\d|3[01])\.|::|fc|fd|fe80)/i.test(
+            address,
+          ),
+        )
+      )
+        throw new Error("Адрес OPDS недоступен");
+      const response = await this.fetcher(target, {
+        signal: AbortSignal.timeout(8000),
+        redirect: "manual",
+        headers: {
+          Accept: route.startsWith("/opds/")
+            ? "application/atom+xml"
+            : "application/octet-stream",
+        },
+      });
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        await response.body?.cancel();
+        if (!location || route.startsWith("/opds/"))
+          throw new Error("Недопустимое перенаправление каталога");
+        target = new URL(location, target);
+        continue;
+      }
+      if (!response.ok || !response.body)
+        throw new Error("Каталог сейчас недоступен. Повторите позже.");
+      return response;
+    }
+    throw new Error("Слишком много перенаправлений каталога");
   }
+
   async search(query: string): Promise<ArchiveBook[]> {
     const response = await this.request(
       "/opds/search?searchType=books&searchTerm=" + encodeURIComponent(query),

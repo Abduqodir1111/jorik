@@ -228,7 +228,7 @@ test("OPDS rejects external acquisition paths/entities/redirects and streams boo
   const xml =
     '<feed><entry><id>1</id><title>Книга</title><author><name>Автор</name></author><link rel="http://opds-spec.org/acquisition/open-access" href="/b/123/epub"/><link rel="http://opds-spec.org/acquisition/open-access" href="https://evil.example/b/1/epub"/></entry></feed>';
   const service = new ArchiveOPDS("https://example.com", (async (url, opts) => {
-    assert.equal(opts?.redirect, "error");
+    assert.equal(opts?.redirect, "manual");
     return new URL(String(url)).pathname.startsWith("/opds")
       ? new Response(xml)
       : new Response("book-data", {
@@ -887,4 +887,41 @@ test("Slow File Station link creation returns 202, deduplicates clicks and can b
     await app.close();
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test("OPDS refuses off-host and insecure download redirects before requesting them", async () => {
+  for (const location of [
+    "https://evil.example/file",
+    "http://example.com/file",
+    "https://127.0.0.1/file",
+  ]) {
+    let requests = 0;
+    const service = new ArchiveOPDS("https://example.com", (async () => {
+      requests++;
+      return new Response(null, { status: 302, headers: { location } });
+    }) as typeof fetch);
+    await assert.rejects(
+      service.download("/b/123/fb2/opds"),
+      /перенаправление/,
+    );
+    assert.equal(requests, 1);
+  }
+  let requests = 0;
+  const service = new ArchiveOPDS("https://example.com", (async () => {
+    requests++;
+    return requests === 1
+      ? new Response(null, {
+          status: 302,
+          headers: { location: "/files/book.zip" },
+        })
+      : new Response("book", {
+          headers: { "Content-Type": "application/zip" },
+        });
+  }) as typeof fetch);
+  const { stream, extension } = await service.download("/b/123/fb2/opds");
+  let data = "";
+  for await (const part of stream) data += part.toString();
+  assert.equal(data, "book");
+  assert.equal(extension, "fb2.zip");
+  assert.equal(requests, 2);
 });
