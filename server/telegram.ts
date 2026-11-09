@@ -1581,6 +1581,8 @@ export class TelegramIntegration {
                 }),
               }),
             );
+            if (result instanceof Api.UpdateShortSentMessage)
+              return { externalId: String(result.id) };
             if (
               result instanceof Api.Updates ||
               result instanceof Api.UpdatesCombined
@@ -1592,6 +1594,11 @@ export class TelegramIntegration {
                 )
                   return { externalId: String(u.id) };
             }
+            const confirmed = this.store.db
+              .prepare("SELECT external_id FROM messages WHERE id=?")
+              .get(m.id) as { external_id: string | null };
+            if (confirmed.external_id)
+              return { externalId: confirmed.external_id };
             throw new Error("No confirmation");
           } catch {
             throw new SendFailure(

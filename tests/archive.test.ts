@@ -655,3 +655,128 @@ test("OPDS supports the provider fixed /opds download suffix, same-origin absolu
   );
   await assert.rejects(html.search("title"), /OPDS/);
 });
+test("Telegram native archive video accepts short confirmation and early echo, never retries ambiguous send", async () => {
+  const { Api } = await import("teleproto"),
+    { openDb } = await import("../server/db.js"),
+    { Store } = await import("../server/store.js"),
+    { TelegramIntegration } = await import("../server/telegram.js");
+  const dir = await temp(),
+    db = openDb(dir, "real"),
+    store = new Store(db),
+    integration = new TelegramIntegration(store, {
+      apiId: 123,
+      apiHash: "a".repeat(32),
+      encryptionKey: "b".repeat(64),
+    });
+  try {
+    db.prepare(
+      "UPDATE accounts SET state='connected' WHERE id='telegram-1'",
+    ).run();
+    db.prepare("INSERT INTO telegram_peers VALUES(?,?,?,?,?)").run(
+      "telegram-1",
+      "12345",
+      "67890",
+      "Test",
+      "test",
+    );
+    const cid = randomUUID();
+    db.prepare(
+      "INSERT INTO conversations(id,account_id,external_id,name,username,updated_at) VALUES(?,?,?,?,?,?)",
+    ).run(cid, "telegram-1", "12345", "Test", "test", new Date().toISOString());
+    Object.defineProperty(integration, "authenticated", {
+      value: true,
+      writable: true,
+    });
+    let kind = "short",
+      sends = 0,
+      current = "";
+    integration.client = {
+      connected: true,
+      destroy: async () => {},
+      invoke: async (request: any) => {
+        if (request instanceof Api.upload.SaveFilePart) {
+          assert.ok(request.bytes.length <= 512 * 1024);
+          return true;
+        }
+        assert.ok(request instanceof Api.messages.SendMedia);
+        sends++;
+        assert.equal((request.peer as any).userId.toString(), "12345");
+        assert.equal(request.media.mimeType, "video/mp4");
+        assert.equal(
+          request.media.attributes.find(
+            (a: any) => a instanceof Api.DocumentAttributeVideo,
+          ).supportsStreaming,
+          true,
+        );
+        if (kind === "ambiguous") throw new Error("lost response");
+        if (kind === "echo") {
+          db.prepare("UPDATE messages SET external_id='992' WHERE id=?").run(
+            current,
+          );
+          return new Api.Updates({
+            updates: [],
+            users: [],
+            chats: [],
+            date: Math.floor(Date.now() / 1000),
+            seq: 1,
+          });
+        }
+        return new Api.UpdateShortSentMessage({
+          id: 991,
+          pts: 1,
+          ptsCount: 1,
+          date: Math.floor(Date.now() / 1000),
+          out: true,
+        });
+      },
+    } as any;
+    const file = path.join(dir, "sample.mp4");
+    await fs.writeFile(file, "video-bytes");
+    const add = () => {
+      const id = randomUUID(),
+        key = randomUUID();
+      db.prepare(
+        "INSERT INTO archive_jobs(id,idempotency_key,conversation_id,entry_id,file,size,duration,width,height,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+      ).run(id, key, cid, "entry", file, 11, 1, 160, 240, Date.now());
+      current = store.enqueue(cid, "", key, { archiveJobId: id });
+      db.prepare(
+        "UPDATE archive_jobs SET message_id=?,state='queued' WHERE id=?",
+      ).run(current, id);
+      return current;
+    };
+    const first = add();
+    await store.tick();
+    assert.equal(
+      store.messages(cid).find((m) => m.id === first)?.status,
+      "sent",
+    );
+    assert.equal(
+      store.messages(cid).find((m) => m.id === first)?.externalId,
+      "991",
+    );
+    kind = "echo";
+    const second = add();
+    await store.tick();
+    assert.equal(
+      store.messages(cid).find((m) => m.id === second)?.status,
+      "sent",
+    );
+    assert.equal(
+      store.messages(cid).find((m) => m.id === second)?.externalId,
+      "992",
+    );
+    kind = "ambiguous";
+    const third = add();
+    await store.tick();
+    assert.equal(
+      store.messages(cid).find((m) => m.id === third)?.status,
+      "unknown",
+    );
+    await store.tick();
+    assert.equal(sends, 3);
+  } finally {
+    await integration.close();
+    db.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
