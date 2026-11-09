@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { ArchiveEntry, ArchiveJob, ArchiveBook } from "../shared/archive";
 import "./archive-search.css";
+import ArchiveBrowser from "./ArchiveBrowser";
 async function request<T>(
   url: string,
   body?: unknown,
@@ -61,6 +62,7 @@ export default function ArchiveSearch({
     } | null>(null),
     lock = useRef(false);
   const active = fullPage || open;
+  const [preview, setPreview] = useState<ArchiveEntry | null>(null);
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();
@@ -298,13 +300,21 @@ export default function ArchiveSearch({
                   {e.source.toUpperCase()}
                 </span>
                 <div className="archive-actions">
+                  <button onClick={() => setPreview(e)}>
+                    {e.type === "folder" ? (
+                      <Folder size={14} />
+                    ) : (
+                      <Video size={14} />
+                    )}
+                    {e.type === "folder" ? "Открыть" : "Предпросмотр"}
+                  </button>
                   <a
                     href={"/archive-open.html?id=" + encodeURIComponent(e.id)}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
                     <ExternalLink size={14} />
-                    {e.type === "folder" ? "Открыть" : "Предпросмотр"}
+                    Поделиться ссылкой
                   </a>
                   {e.type === "video" && (
                     <button
@@ -376,6 +386,25 @@ export default function ArchiveSearch({
               )}
           </div>
         </>
+      )}
+      {preview && (
+        <ArchiveBrowser
+          key={preview.id}
+          entry={preview}
+          chatName={chatName}
+          canSend={!!conversationId}
+          busy={busy}
+          sendStatus={
+            job
+              ? labels[job.state] +
+                " · " +
+                target +
+                (job.error ? ": " + job.error : "")
+              : ""
+          }
+          onSend={() => void send(preview)}
+          onClose={() => setPreview(null)}
+        />
       )}
     </section>
   );

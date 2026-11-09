@@ -30,6 +30,35 @@ export class ArchiveVideo {
     readonly ffmpeg = process.env.FFMPEG_PATH || "ffmpeg",
     readonly ffprobe = process.env.FFPROBE_PATH || "ffprobe",
   ) {}
+  private cachePath(e: {
+    path: string;
+    stat: { size: number; mtimeMs: number };
+  }) {
+    const key = createHash("sha256")
+      .update(`${e.path}:${e.stat.size}:${e.stat.mtimeMs}:h264-v1`)
+      .digest("hex");
+    return path.join(this.cacheDir, key + ".chat.mp4");
+  }
+  // Preview may reuse a finished copy, but must never probe, encode or queue work.
+  async cachedFile(id: string) {
+    const e = await this.index.get(id, "video");
+    const file = this.cachePath(e);
+    try {
+      const stat = await fs.lstat(file);
+      if (
+        stat.isFile() &&
+        !stat.isSymbolicLink() &&
+        stat.size > 0 &&
+        stat.size <= 18 * 1024 * 1024 &&
+        (await fs.realpath(file)) ===
+          path.join(await fs.realpath(this.cacheDir), path.basename(file))
+      )
+        return file;
+    } catch {
+      /* No completed copy yet; stream the original. */
+    }
+    return undefined;
+  }
   prepare(id: string, priority = false) {
     const existing = this.pending.get(id);
     if (existing) {
@@ -122,10 +151,7 @@ export class ArchiveVideo {
       throw new Error("Оригинал видео больше 1 ГБ.");
     const meta = await this.probe(e.path);
     await fs.mkdir(this.cacheDir, { recursive: true, mode: 0o700 });
-    const key = createHash("sha256")
-      .update(`${e.path}:${e.stat.size}:${e.stat.mtimeMs}:h264-v1`)
-      .digest("hex");
-    const file = path.join(this.cacheDir, key + ".chat.mp4");
+    const file = this.cachePath(e);
     const result = async () => {
       const s = await fs.stat(file);
       if (!s.size || s.size > 18 * 1024 * 1024)

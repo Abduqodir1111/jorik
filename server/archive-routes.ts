@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ArchiveIndex, type ArchiveRoot } from "./archive-index.js";
 import { ArchiveVideo } from "./archive-video.js";
+import { registerArchiveFiles } from "./archive-files.js";
 import { ArchiveOPDS } from "./archive-opds.js";
 import { SynologySharing, type SynologyOptions } from "./archive-synology.js";
 import type { Store } from "./store.js";
@@ -24,6 +25,7 @@ export function registerArchive(
 ) {
   const index = new ArchiveIndex(opts?.roots || []);
   const video = new ArchiveVideo(index, path.join(dataDir, "archive-cache"));
+  registerArchiveFiles(app, index, video);
   const sharing = new SynologySharing(
     store.db,
     opts?.synology || { url: "", username: "", password: "" },
