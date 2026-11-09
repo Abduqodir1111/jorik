@@ -138,6 +138,7 @@ test("Archive API auth, persistent idempotency, deferred preparation, preserved 
       headers: { range: "bytes=0-3" },
     });
     assert.equal(range.statusCode, 206);
+    assert.equal(range.headers["cache-control"], "no-store");
     assert.equal(range.body, "prep");
     assert.equal(
       (await app.inject("/api/archive/search?q=te")).json()[0].id,
@@ -529,6 +530,50 @@ test("Index snapshot survives restart and rejects changed root mappings", async 
     assert.equal(await changed.load(snapshot), false);
     assert.equal(changed.count, 0);
   } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+test("Gzip leaves SSE unbuffered and static cache policy preserves authenticated files and SW", async () => {
+  const { gunzipSync } = await import("node:zlib");
+  const dir = await temp(),
+    { app, store } = await createApp({
+      mode: "demo",
+      dataDir: dir,
+      worker: false,
+      localAccess: true,
+    });
+  try {
+    seed(store);
+    const state = await app.inject({
+      url: "/api/state",
+      headers: { "accept-encoding": "gzip" },
+    });
+    assert.equal(state.headers["content-encoding"], "gzip");
+    assert.equal(state.headers["cache-control"], "no-store");
+    assert.equal(
+      JSON.parse(gunzipSync(state.rawPayload).toString()).accounts.length,
+      4,
+    );
+    assert.equal(
+      (await app.inject("/sw.js")).headers["cache-control"],
+      "no-store",
+    );
+    assert.equal((await app.inject("/")).headers["cache-control"], "no-cache");
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const addr = app.server.address() as { port: number };
+    const r = await fetch(`http://127.0.0.1:${addr.port}/api/events`, {
+      headers: { "accept-encoding": "gzip" },
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get("content-encoding"), null);
+    const reader = r.body!.getReader();
+    assert.match(
+      new TextDecoder().decode((await reader.read()).value),
+      /connected/,
+    );
+    await reader.cancel();
+  } finally {
+    await app.close();
     await fs.rm(dir, { recursive: true, force: true });
   }
 });

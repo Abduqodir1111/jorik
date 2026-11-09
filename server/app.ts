@@ -948,6 +948,10 @@ export async function createApp(opts: {
     await app.register(staticFiles, {
       root: path.resolve("dist"),
       setHeaders(res, file) {
+        if (res.request.url.startsWith("/api/")) {
+          res.header("Cache-Control", "no-store");
+          return;
+        }
         res.header(
           "Cache-Control",
           /[/\\]assets[/\\].+-[a-zA-Z0-9_-]+\.(js|css)$/.test(file)
