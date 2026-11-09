@@ -51,6 +51,16 @@ export class ArchiveVideo {
     if (!this.active) this.running = this.drain();
     return task;
   }
+  private async hostHasHeadroom() {
+    if (process.platform !== "linux") return true;
+    try {
+      const info = await fs.readFile("/proc/meminfo", "utf8");
+      const available = Number(info.match(/^MemAvailable:\s+(\d+)/m)?.[1]);
+      return !available || available >= 180 * 1024;
+    } catch {
+      return false;
+    }
+  }
   warm() {
     if (this.background || this.stopped) return;
     this.background = (async () => {
@@ -59,7 +69,7 @@ export class ArchiveVideo {
         while (
           !this.stopped &&
           process.platform === "linux" &&
-          os.loadavg()[0] > 2.5
+          (os.loadavg()[0] > 2.5 || !(await this.hostHasHeadroom()))
         ) {
           try {
             await delay(30000, undefined, {
@@ -117,10 +127,10 @@ export class ArchiveVideo {
       duration > 180 ||
       !v.width ||
       !v.height ||
-      v.width * v.height > 9000000
+      v.width * v.height > 2100000
     )
       throw new Error(
-        "Видео должно длиться до 3 минут и иметь разрешение не выше 4K.",
+        "Для этого NAS: видео до 3 минут и Full HD (1920×1080 или 1080×1920). Видео 4K сначала уменьшите на компьютере.",
       );
     return {
       duration,
@@ -133,6 +143,10 @@ export class ArchiveVideo {
   }
   private async convert(id: string): Promise<PreparedVideo> {
     if (this.stopped) throw new Error("Подготовка остановлена");
+    if (!(await this.hostHasHeadroom()))
+      throw new Error(
+        "Сервер занят: недостаточно свободной памяти для видео. Повторите позже.",
+      );
     const e = await this.index.get(id, "video");
     if (e.stat.size > 1024 * 1024 * 1024)
       throw new Error("Оригинал видео больше 1 ГБ.");
@@ -205,7 +219,7 @@ export class ArchiveVideo {
         "scale='if(gt(iw,ih),min(720,iw),-2)':'if(gt(iw,ih),-2,min(720,ih))',setsar=1";
       const hdr = ["smpte2084", "arib-std-b67"].includes(meta.transfer);
       const filter = hdr
-        ? `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,${scale},format=yuv420p`
+        ? `${scale},zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p`
         : scale;
       // Rate budget includes audio and mux overhead, verified again after conversion.
       const rate = Math.min(

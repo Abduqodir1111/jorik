@@ -1,3 +1,6 @@
+import os from "node:os";
+import { setTimeout as delay } from "node:timers/promises";
+import { mediaGate } from "./media-gate.js";
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -27,6 +30,8 @@ export function registerArchive(
     opts?.synology || { url: "", username: "", password: "" },
   );
   const opds = new ArchiveOPDS(opts?.opdsBase || "https://flibusta.is");
+  const shutdown = new AbortController();
+  const respectLoad = store.accounts().some((a) => a.mode === "real");
   let stopped = false,
     timer: ReturnType<typeof setTimeout> | undefined,
     scan: Promise<unknown> | undefined,
@@ -94,19 +99,35 @@ export function registerArchive(
   };
   const rebuild = () => {
     if (scan) return scan;
-    scan = index
-      .build()
-      .then(async (ok) => {
-        if (ok && !stopped) {
+    scan = (async () => {
+      while (
+        !stopped &&
+        respectLoad &&
+        process.platform === "linux" &&
+        os.loadavg()[0] > 4
+      ) {
+        try {
+          await delay(30000, undefined, {
+            signal: shutdown.signal,
+            ref: false,
+          });
+        } catch {
+          return;
+        }
+      }
+      if (stopped) return;
+      await mediaGate(async () => {
+        if (stopped) return;
+        const ok = await index.build();
+        if (ok && !stopped)
           await index
             .save(path.join(dataDir, "archive-index.json"))
             .catch(() => {});
-          if (opts?.warmVideos) video.warm();
-        }
-      })
-      .finally(() => {
-        scan = undefined;
       });
+      if (index.updatedAt && opts?.warmVideos && !stopped) video.warm();
+    })().finally(() => {
+      scan = undefined;
+    });
     return scan;
   };
   const nextScan = () => {
@@ -120,7 +141,7 @@ export function registerArchive(
   };
   app.get("/api/archive/status", async () => ({
     enabled: !!opts?.roots.length,
-    indexing: index.indexing,
+    indexing: index.indexing || !!scan,
     updatedAt: index.updatedAt,
     error: index.error,
     count: index.count,
@@ -275,6 +296,7 @@ export function registerArchive(
   });
   app.addHook("preClose", async () => {
     stopped = true;
+    shutdown.abort();
     index.close();
     clearTimeout(timer);
     clearInterval(worker);

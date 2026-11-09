@@ -56,45 +56,58 @@ export class ArchiveIndex {
   close() {
     this.closed = true;
   }
+  private async resolvedRoots() {
+    return Promise.all(
+      this.roots.map(async (r) => ({ ...r, path: await fs.realpath(r.path) })),
+    );
+  }
   async load(file: string) {
     try {
       const stat = await fs.stat(file);
-      if (stat.size > 20 * 1024 * 1024) return false;
+      if (stat.size > 12 * 1024 * 1024) return false;
       const saved = JSON.parse(await fs.readFile(file, "utf8"));
+      const roots = await this.resolvedRoots();
       if (
+        saved.version !== 1 ||
+        JSON.stringify(saved.roots) !== JSON.stringify(roots) ||
         !Array.isArray(saved.entries) ||
         saved.entries.length > this.maxEntries ||
         !Number.isFinite(Date.parse(saved.updatedAt))
       )
         return false;
-      const roots = await Promise.all(
-        this.roots.map(async (r) => ({
-          ...r,
-          path: await fs.realpath(r.path),
-        })),
-      );
-      for (const e of saved.entries) {
-        const root = roots.find(
-          (r) => r.path === e.root && r.source === e.source,
-        );
+      const next: IndexedEntry[] = [];
+      for (const tuple of saved.entries) {
         if (
-          !root ||
-          typeof e.path !== "string" ||
-          typeof e.name !== "string" ||
-          !["folder", "video"].includes(e.type) ||
-          !e.path.startsWith(root.path + path.sep) ||
-          e.sharePath !==
-            path.posix.join(
-              root.share,
-              path.relative(root.path, e.path).split(path.sep).join("/"),
-            ) ||
-          e.id !==
-            createHash("sha256").update(e.path).digest("hex").slice(0, 24)
+          !Array.isArray(tuple) ||
+          tuple.length !== 2 ||
+          !Number.isInteger(tuple[0]) ||
+          typeof tuple[1] !== "string"
         )
           return false;
+        const root = roots[tuple[0]],
+          relative = tuple[1];
+        const parts = relative.split(path.sep);
+        if (
+          !root ||
+          parts.length > 2 ||
+          parts.some((s: string) => !s || s === ".." || hidden(s)) ||
+          path.isAbsolute(relative) ||
+          (root.videos && !/\.(mp4|mov)$/i.test(relative))
+        )
+          return false;
+        const full = path.join(root.path, relative);
+        next.push({
+          id: createHash("sha256").update(full).digest("hex").slice(0, 24),
+          name: parts.join(" / "),
+          type: root.videos ? "video" : "folder",
+          source: root.source,
+          path: full,
+          root: root.path,
+          sharePath: path.posix.join(root.share, parts.join("/")),
+        });
       }
-      this.fuse.setCollection(saved.entries);
-      this.entries = new Map(saved.entries.map((e: IndexedEntry) => [e.id, e]));
+      this.fuse.setCollection(next);
+      this.entries = new Map(next.map((e) => [e.id, e]));
       this.updatedAt = saved.updatedAt;
       return true;
     } catch {
@@ -102,10 +115,16 @@ export class ArchiveIndex {
     }
   }
   async save(file: string) {
+    const roots = await this.resolvedRoots();
+    // Store each relative path once; avoid serializing three repeated absolute paths per entry.
+    const entries = this.list().map((e) => [
+      roots.findIndex((r) => r.path === e.root && r.source === e.source),
+      path.relative(e.root, e.path),
+    ]);
     const temp = file + ".tmp";
     await fs.writeFile(
       temp,
-      JSON.stringify({ updatedAt: this.updatedAt, entries: this.list() }),
+      JSON.stringify({ version: 1, roots, updatedAt: this.updatedAt, entries }),
       { mode: 0o600 },
     );
     await fs.rename(temp, file);
