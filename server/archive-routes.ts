@@ -155,12 +155,65 @@ export function registerArchive(
     void rebuild();
     return reply.code(202).send({ indexing: true });
   });
-  app.post("/api/archive/link", async (req) => {
+  type LinkTask = {
+    id: string;
+    entryId: string;
+    state: "pending" | "ready" | "error";
+    url?: string;
+    error?: string;
+    expires: number;
+    work?: Promise<void>;
+  };
+  const linkTasks = new Map<string, LinkTask>();
+  app.post("/api/archive/link", async (req, reply) => {
     const { id } = z
       .object({ id: z.string().regex(/^[a-f0-9]{24}$/) })
       .parse(req.body);
     const e = await index.get(id);
-    return { url: await sharing.get(e.sharePath) };
+    for (const [key, t] of linkTasks)
+      if (t.expires < Date.now() && t.state !== "pending")
+        linkTasks.delete(key);
+    let task = [...linkTasks.values()].find(
+      (t) => t.entryId === id && t.state !== "error",
+    );
+    if (!task) {
+      if (linkTasks.size >= 40)
+        throw new Error("Слишком много запросов ссылок. Повторите позже.");
+      task = {
+        id: randomUUID(),
+        entryId: id,
+        state: "pending",
+        expires: Date.now() + 600000,
+      };
+      linkTasks.set(task.id, task);
+      const current = task;
+      current.work = sharing
+        .get(e.sharePath)
+        .then((url) => {
+          current.url = url;
+          current.state = "ready";
+        })
+        .catch((error) => {
+          current.error =
+            error instanceof Error
+              ? error.message
+              : "Не удалось создать ссылку";
+          current.state = "error";
+        });
+    }
+    await Promise.race([task.work, delay(200)]);
+    if (task.state === "ready") return { url: task.url };
+    if (task.state === "error") throw new Error(task.error);
+    return reply.code(202).send({ taskId: task.id, state: "pending" });
+  });
+  app.get<{ Params: { id: string } }>("/api/archive/links/:id", async (req) => {
+    const task = linkTasks.get(req.params.id);
+    if (!task)
+      throw Object.assign(
+        new Error("Запрос ссылки не найден. Повторите открытие."),
+        { statusCode: 404 },
+      );
+    return { state: task.state, url: task.url, error: task.error };
   });
   app.get("/api/archive/flibusta/search", async (req) =>
     opds.search(query.parse(req.query).q),

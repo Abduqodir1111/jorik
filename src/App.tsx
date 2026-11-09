@@ -564,10 +564,12 @@ export default function App() {
     a?.adapter === "instagram-graph"
       ? messages.filter((m) => m.direction === "in").at(-1)
       : undefined;
+  const lastInstagramIncomingAt =
+    c?.lastIncomingAt || lastInstagramIncoming?.createdAt;
   const instagramWindowClosed =
     a?.adapter === "instagram-graph" &&
-    (!lastInstagramIncoming ||
-      clockNow - Date.parse(lastInstagramIncoming.createdAt) >= 86400000);
+    (!lastInstagramIncomingAt ||
+      clockNow - Date.parse(lastInstagramIncomingAt) >= 86400000);
   const filtered = useMemo(() => {
     const query = q.toLocaleLowerCase();
     const matches = new Set(searchIds);

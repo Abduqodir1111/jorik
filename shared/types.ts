@@ -30,6 +30,7 @@ export interface Account {
   capabilities: Capabilities;
 }
 export interface Conversation {
+  lastIncomingAt?: string | null;
   needsReply?: boolean;
   stage?: "" | "new" | "paid" | "waiting";
   id: string;

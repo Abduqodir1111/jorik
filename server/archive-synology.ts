@@ -9,6 +9,7 @@ export class SynologySharing {
   private sid = "";
   private login?: Promise<void>;
   private pending = new Map<string, Promise<string>>();
+  private queue: Promise<unknown> = Promise.resolve();
   constructor(
     private db: DB,
     private opts: SynologyOptions,
@@ -22,7 +23,7 @@ export class SynologySharing {
         // Cold DSM authentication on the 1 GB NAS takes ~20s; file calls stay bounded separately.
         signal: AbortSignal.timeout(
           params.api === "SYNO.API.Auth" && params.method === "login"
-            ? 35000
+            ? 60000
             : 15000,
         ),
         redirect: "error",
@@ -56,11 +57,16 @@ export class SynologySharing {
     await this.login;
   }
   get(sharePath: string) {
+    const cached = this.db
+      .prepare("SELECT url FROM archive_links WHERE path=? AND expires_at>?")
+      .get(sharePath, Date.now() + 60000) as { url: string } | undefined;
+    if (cached) return Promise.resolve(cached.url);
     const found = this.pending.get(sharePath);
     if (found) return found;
-    const task = this.create(sharePath).finally(() =>
-      this.pending.delete(sharePath),
-    );
+    const task = this.queue
+      .then(() => this.create(sharePath))
+      .finally(() => this.pending.delete(sharePath));
+    this.queue = task.catch(() => {});
     this.pending.set(sharePath, task);
     return task;
   }

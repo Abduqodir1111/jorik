@@ -142,8 +142,31 @@ export default function ArchiveSearch({
     }
     win.opener = null;
     try {
-      const { url } = await request<{ url: string }>("/link", { id });
-      const u = new URL(url);
+      win.document.body.textContent = "Готовим ссылку на папку…";
+      let result = await request<{
+        url?: string;
+        taskId?: string;
+        state?: string;
+        error?: string;
+      }>("/link", { id });
+      const taskId = result.taskId,
+        deadline = Date.now() + 120000;
+      while (!result.url && taskId && Date.now() < deadline && !win.closed) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        result = await request<{
+          url?: string;
+          state?: string;
+          error?: string;
+        }>("/links/" + taskId);
+        if (result.state === "error")
+          throw new Error(result.error || "Не удалось открыть папку");
+      }
+      if (win.closed) return;
+      if (!result.url)
+        throw new Error(
+          "DSM долго готовит ссылку. Повторите открытие чуть позже.",
+        );
+      const u = new URL(result.url);
       if (!["https:", "http:"].includes(u.protocol))
         throw new Error("Недопустимая ссылка");
       win.location.href = u.href;

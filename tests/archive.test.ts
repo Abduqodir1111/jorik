@@ -780,3 +780,111 @@ test("Telegram native archive video accepts short confirmation and early echo, n
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+test("Recent history pagination retains the authoritative last incoming timestamp for Instagram reply windows", async () => {
+  const dir = await temp(),
+    { app, store, db } = await createApp({
+      dataDir: dir,
+      mode: "demo",
+      worker: false,
+      localAccess: true,
+    });
+  try {
+    seed(store);
+    const c = store.conversations().find((c) => c.accountId === "instagram-1")!;
+    db.prepare("DELETE FROM outbox WHERE conversation_id=?").run(c.id);
+    db.prepare("DELETE FROM messages WHERE conversation_id=?").run(c.id);
+    const incoming = new Date(Date.now() - 60000).toISOString();
+    db.prepare(
+      "INSERT INTO messages(id,conversation_id,direction,text,status,created_at) VALUES(?,?,'in','question','sent',?)",
+    ).run(randomUUID(), c.id, incoming);
+    for (let i = 0; i < 50; i++)
+      db.prepare(
+        "INSERT INTO messages(id,conversation_id,direction,text,status,created_at) VALUES(?,?,'out','answer','sent',?)",
+      ).run(
+        randomUUID(),
+        c.id,
+        new Date(Date.now() - 50000 + i * 500).toISOString(),
+      );
+    const recent = (
+      await app.inject("/api/conversations/" + c.id + "/messages?limit=40")
+    ).json();
+    assert.equal(recent.length, 40);
+    assert.ok(recent.every((m: any) => m.direction === "out"));
+    const state = (await app.inject("/api/state")).json();
+    assert.equal(
+      state.conversations.find((x: any) => x.id === c.id).lastIncomingAt,
+      incoming,
+    );
+    assert.equal(store.conversation(c.id).lastIncomingAt, incoming);
+  } finally {
+    await app.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+test("Slow File Station link creation returns 202, deduplicates clicks and can be polled without holding HTTP open", async () => {
+  const dir = await temp(),
+    root = path.join(dir, "books");
+  await fs.mkdir(path.join(root, "Example"), { recursive: true });
+  let release!: () => void,
+    logins = 0,
+    creates = 0;
+  const gate = new Promise<void>((r) => (release = r));
+  const { app, archive } = await createApp({
+    mode: "demo",
+    dataDir: dir,
+    worker: false,
+    localAccess: true,
+    archive: {
+      roots: [
+        { path: root, share: "/Books", source: "Storebooks", videos: false },
+      ],
+      synology: {
+        url: "https://example.com",
+        username: "service",
+        password: "test-only",
+        fetcher: (async (_url, opts) => {
+          const p = opts?.body as URLSearchParams;
+          if (p.get("api") === "SYNO.API.Auth") {
+            logins++;
+            await gate;
+            return Response.json({
+              success: true,
+              data: { sid: "test-session" },
+            });
+          }
+          creates++;
+          return Response.json({
+            success: true,
+            data: { links: [{ url: "https://gofile.me/test-only" }] },
+          });
+        }) as typeof fetch,
+      },
+    },
+  });
+  try {
+    await archive.rebuild();
+    const id = archive.index.list()[0].id;
+    const post = () =>
+      app.inject({ method: "POST", url: "/api/archive/link", payload: { id } });
+    const first = await post();
+    assert.equal(first.statusCode, 202);
+    const task = first.json().taskId;
+    assert.equal((await post()).json().taskId, task);
+    assert.equal(
+      (await app.inject("/api/archive/links/" + task)).json().state,
+      "pending",
+    );
+    release();
+    await new Promise((r) => setImmediate(r));
+    const ready = (await app.inject("/api/archive/links/" + task)).json();
+    assert.equal(ready.state, "ready");
+    assert.equal(ready.url, "https://gofile.me/test-only");
+    assert.equal((await post()).json().url, ready.url);
+    assert.equal(logins, 1);
+    assert.equal(creates, 1);
+  } finally {
+    release();
+    await app.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
