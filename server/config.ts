@@ -12,6 +12,44 @@ export const config = {
   mode: mode as Mode,
   localAccess: process.env.LOCAL_TEST_NO_PASSWORD === "true",
   disableRateLimit: process.env.LOCAL_TEST_NO_RATE_LIMIT === "true",
+  archive: {
+    roots:
+      process.env.ARCHIVE_ENABLED === "true"
+        ? [
+            {
+              path: "/archive/storebooks/books",
+              share: "/Storebooks/Books",
+              source: "Storebooks" as const,
+              videos: false,
+            },
+            {
+              path: "/archive/mangastore/manga",
+              share: "/Mangastore/Manga",
+              source: "Mangastore" as const,
+              videos: false,
+            },
+            {
+              path: "/archive/storebooks/reviews",
+              share: "/Storebooks/Обзоры",
+              source: "Storebooks" as const,
+              videos: true,
+            },
+            {
+              path: "/archive/mangastore/reviews",
+              share: "/Mangastore/Обзоры",
+              source: "Mangastore" as const,
+              videos: true,
+            },
+          ]
+        : [],
+    synology: {
+      url: process.env.ARCHIVE_DSM_URL || "",
+      username: process.env.ARCHIVE_DSM_USER || "",
+      password: process.env.ARCHIVE_DSM_PASSWORD || "",
+    },
+    opdsBase: process.env.FLIBUSTA_BASE_URL || "https://flibusta.is",
+    warmVideos: process.env.ARCHIVE_WARM_VIDEOS === "true",
+  },
   push: {
     publicKey: process.env.VAPID_PUBLIC_KEY,
     privateKey: process.env.VAPID_PRIVATE_KEY,

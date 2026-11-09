@@ -53,12 +53,38 @@ export class Store {
     if (!c) throw new Error("Диалог не найден");
     return { ...c, needsReply: c.unread > 0 };
   }
-  messages(id: string): Message[] {
-    const rows = this.db
-      .prepare(
-        "SELECT id,conversation_id AS conversationId,external_id AS externalId,direction,text,status,created_at AS createdAt,error,attachments,edited_at AS editedAt,reactions,reply_to_id AS replyToId,read_at AS readAt,reply_to_external_id AS replyExternalId,reply_to_snapshot AS replySnapshot FROM messages WHERE conversation_id=? AND deleted_at IS NULL ORDER BY created_at,rowid",
-      )
-      .all(id) as (Omit<Message, "attachments"> & {
+  messages(id: string, page?: { limit: number; before?: string }): Message[] {
+    const cursor = page?.before
+      ? (this.db
+          .prepare(
+            "SELECT created_at,rowid FROM messages WHERE id=? AND conversation_id=?",
+          )
+          .get(page.before, id) as
+          { created_at: string; rowid: number } | undefined)
+      : undefined;
+    if (page?.before && !cursor) throw new Error("Граница истории не найдена");
+    const select =
+      "SELECT id,conversation_id AS conversationId,external_id AS externalId,direction,text,status,created_at AS createdAt,error,attachments,edited_at AS editedAt,reactions,reply_to_id AS replyToId,read_at AS readAt,reply_to_external_id AS replyExternalId,reply_to_snapshot AS replySnapshot FROM messages WHERE conversation_id=? AND deleted_at IS NULL";
+    const rows = (
+      page
+        ? this.db
+            .prepare(
+              select +
+                (cursor
+                  ? " AND (created_at<? OR (created_at=? AND rowid<?))"
+                  : "") +
+                " ORDER BY created_at DESC,rowid DESC LIMIT ?",
+            )
+            .all(
+              id,
+              ...(cursor
+                ? [cursor.created_at, cursor.created_at, cursor.rowid]
+                : []),
+              page.limit,
+            )
+            .reverse()
+        : this.db.prepare(select + " ORDER BY created_at,rowid").all(id)
+    ) as (Omit<Message, "attachments"> & {
       attachments: string;
       reactions: string;
       replyExternalId: string | null;
@@ -85,11 +111,16 @@ export class Store {
         .map((m) => [canonical(m.externalId!), m]),
     );
     return rows.map(({ replyExternalId, replySnapshot, ...m }) => {
-      const target =
+      let target =
         (m.replyToId ? byId.get(m.replyToId) : undefined) ||
         (replyExternalId
           ? byExternal.get(canonical(replyExternalId))
           : undefined);
+      if (!target && page && (m.replyToId || replyExternalId)) {
+        target = this.db
+          .prepare(select + " AND (id=? OR external_id=?) LIMIT 1")
+          .get(id, m.replyToId || "", replyExternalId || "") as typeof target;
+      }
       let snapshot: Message["reply_to"];
       if (replySnapshot) {
         try {
@@ -183,6 +214,7 @@ export class Store {
     options: {
       replyToId?: string;
       uploadId?: string;
+      archiveJobId?: string;
       preserveDraft?: boolean;
     } = {},
   ) {
@@ -219,6 +251,16 @@ export class Store {
         : undefined;
       if (options.uploadId && !upload)
         throw new Error("Вложение не принадлежит этому диалогу.");
+      const archive = options.archiveJobId
+        ? (this.db
+            .prepare(
+              "SELECT id,size,duration FROM archive_jobs WHERE id=? AND conversation_id=? AND file IS NOT NULL AND state='preparing'",
+            )
+            .get(options.archiveJobId, id) as
+            { id: string; size: number; duration: number } | undefined)
+        : undefined;
+      if (options.archiveJobId && !archive)
+        throw new Error("Видео не принадлежит этому диалогу");
       const mid = randomUUID(),
         now = new Date().toISOString();
       this.db
@@ -231,17 +273,28 @@ export class Store {
         .run(
           options.replyToId || null,
           JSON.stringify(
-            upload
+            archive
               ? [
                   {
-                    kind: "image",
-                    url: "/api/uploads/" + upload.id,
-                    name: upload.name,
-                    mime: upload.mime,
-                    size: upload.size,
+                    kind: "video",
+                    url: "/api/archive/video/" + archive.id,
+                    name: "Видеообзор",
+                    mime: "video/mp4",
+                    size: archive.size,
+                    duration: archive.duration,
                   },
                 ]
-              : [],
+              : upload
+                ? [
+                    {
+                      kind: "image",
+                      url: "/api/uploads/" + upload.id,
+                      name: upload.name,
+                      mime: upload.mime,
+                      size: upload.size,
+                    },
+                  ]
+                : [],
           ),
           mid,
         );

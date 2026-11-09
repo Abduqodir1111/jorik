@@ -1,8 +1,10 @@
+const ArchiveSearch = lazy(() => import("./ArchiveSearch"));
 import { quickReplyHotkey, nextTemplateIndex } from "../shared/quick-replies";
-import SettingsView from "./SettingsView";
+const SettingsView = lazy(() => import("./SettingsView"));
 import LogoutDialog from "./LogoutDialog";
 import StoreBadge from "./StoreBadge";
-import Orders, { type OrderContext } from "./Orders";
+import type { OrderContext } from "./Orders";
+const Orders = lazy(() => import("./Orders"));
 import { useNotificationSound } from "./NotificationSound";
 import { useOperator } from "./OperatorContext";
 import { ChatCache } from "./chat-cache";
@@ -11,6 +13,8 @@ import AccountName from "./AccountName";
 import { recentConversations } from "../shared/inbox";
 import TelegramConnect from "./TelegramConnect";
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -147,6 +151,8 @@ export default function App() {
     [loading, setLoading] = useState(true),
     [sending, setSending] = useState(false),
     [ownerName, setOwnerName] = useState("Владелец");
+  const [visibleChats, setVisibleChats] = useState(100);
+  useEffect(() => setVisibleChats(100), [q, filter, unread, showAllChats]);
   const [drafts, setDrafts] = useState<Record<string, string>>({}),
     [draftState, setDraftState] = useState(""),
     [historyLoading, setHistoryLoading] = useState(false);
@@ -157,6 +163,9 @@ export default function App() {
     bottom = useRef<HTMLDivElement>(null);
   const chatCache = useRef<ChatCache | null>(null);
   const cacheMode = useRef<string | null>(null);
+  const historyPages = useRef(new Map<string, number>());
+  const [moreHistory, setMoreHistory] = useState<Record<string, boolean>>({});
+  const [historyPaging, setHistoryPaging] = useState(false);
   const historyRequests = useRef(new Map<string, Promise<void>>());
   const syncRequests = useRef(new Map<string, Promise<void>>());
   const followLatest = useRef(true);
@@ -321,7 +330,20 @@ export default function App() {
     if (existing) return existing;
     const cache = chatCache.current;
     const task = (async () => {
-      const ms = await api<Message[]>(`/conversations/${id}/messages`);
+      let ms: Message[] = [];
+      const pages = historyPages.current.get(id) || 1;
+      let before: string | undefined,
+        more = false;
+      for (let n = 0; n < pages; n++) {
+        const batch = await api<Message[]>(
+          `/conversations/${id}/messages?limit=40${before ? "&before=" + encodeURIComponent(before) : ""}`,
+        );
+        ms = [...batch, ...ms];
+        more = batch.length === 40;
+        if (!more) break;
+        before = batch[0].id;
+      }
+      setMoreHistory((old) => ({ ...old, [id]: more }));
       if (cache !== chatCache.current) return;
       const entry = cache?.put(id, ms);
       if (selectedRef.current === id) {
@@ -774,6 +796,7 @@ export default function App() {
           ),
         );
         if (filtered[next]) {
+          setVisibleChats((n) => Math.max(n, next + 1));
           setSelected(filtered[next].id);
           setTemplatesOpen(false);
         }
@@ -939,9 +962,20 @@ export default function App() {
           <Package size={22} />
           <span className="rail-label">Заказы</span>
         </button>
+        <button
+          className={
+            "rail-button archive-nav " + (page === "archive" ? "active" : "")
+          }
+          aria-label="Поиск по архиву"
+          aria-current={page === "archive" ? "page" : undefined}
+          onClick={() => setPage("archive")}
+        >
+          <Search size={22} />
+          <span className="rail-label">Поиск</span>
+        </button>
         <div className="rail-bottom">
           <button
-            className="rail-button"
+            className="rail-button theme-nav"
             aria-label={dark ? "Светлая тема" : "Тёмная тема"}
             title={dark ? "Светлая тема" : "Тёмная тема"}
             onClick={toggleTheme}
@@ -971,7 +1005,9 @@ export default function App() {
                 ? "Входящие"
                 : page === "orders"
                   ? "Заказы"
-                  : "Настройки"}
+                  : page === "archive"
+                    ? "Поиск по архиву"
+                    : "Настройки"}
             </b>
           </div>
           <span className={mode === "demo" ? "demo-label" : "real-label"}>
@@ -1068,7 +1104,7 @@ export default function App() {
                 : "50 последних на аккаунт · Показать все сохранённые"}
             </button>
             <div className="conversation-scroll">
-              {filtered.map((c, i) => {
+              {filtered.slice(0, visibleChats).map((c, i) => {
                 const account = accountsById.get(c.accountId);
                 return account ? (
                   <ConversationRow
@@ -1082,6 +1118,14 @@ export default function App() {
                   />
                 ) : null;
               })}
+              {visibleChats < filtered.length && (
+                <button
+                  className="secondary"
+                  onClick={() => setVisibleChats((n) => n + 100)}
+                >
+                  Показать ещё диалоги
+                </button>
+              )}
               {filtered.length === 0 && (
                 <div className="empty">
                   <Search />
@@ -1246,6 +1290,40 @@ export default function App() {
                   <div className="messages-content">
                     {historyLoading && (
                       <p className="date-separator">Загружаем историю…</p>
+                    )}
+                    {selected && moreHistory[selected] && (
+                      <button
+                        className="secondary history-more"
+                        disabled={historyPaging}
+                        onClick={async () => {
+                          if (historyPaging) return;
+                          setHistoryPaging(true);
+                          const id = selected;
+                          const el = bottom.current?.closest(".messages");
+                          const height = el?.scrollHeight || 0,
+                            top = el?.scrollTop || 0;
+                          historyPages.current.set(
+                            id,
+                            (historyPages.current.get(id) || 1) + 1,
+                          );
+                          followLatest.current = false;
+                          try {
+                            await history(id);
+                            requestAnimationFrame(() => {
+                              if (el && selectedRef.current === id)
+                                el.scrollTop = top + el.scrollHeight - height;
+                            });
+                          } catch (e) {
+                            report(e);
+                          } finally {
+                            setHistoryPaging(false);
+                          }
+                        }}
+                      >
+                        {historyPaging
+                          ? "Загружаем…"
+                          : "Загрузить предыдущие сообщения"}
+                      </button>
                     )}
                     <MessageTimeline
                       messages={messages}
@@ -1570,178 +1648,198 @@ export default function App() {
             </aside>
           )}
         </div>
-        <Orders
-          accounts={accounts}
-          conversations={conversations}
-          visible={page === "orders"}
-          context={orderContext}
-          openRequest={orderRequest}
-          closeRequest={orderCloseRequest}
-          onCloseRequest={() => setOrderContext(undefined)}
-          onPanelChange={setOrderPanelOpen}
-        />
+        <Suspense fallback={null}>
+          <Orders
+            accounts={accounts}
+            conversations={conversations}
+            visible={page === "orders"}
+            context={orderContext}
+            openRequest={orderRequest}
+            closeRequest={orderCloseRequest}
+            onCloseRequest={() => setOrderContext(undefined)}
+            onPanelChange={setOrderPanelOpen}
+          />
+        </Suspense>
+        {(page === "archive" || page === "inbox") && (
+          <Suspense fallback={null}>
+            <ArchiveSearch
+              fullPage={page === "archive"}
+              conversationId={c?.id}
+              chatName={
+                c ? `${c.username || c.name} · ${a?.name || ""}` : undefined
+              }
+            />
+          </Suspense>
+        )}
         {page === "settings" && (
-          <SettingsView
-            accountsExpanded={accountsExpanded}
-            onToggleAccounts={() => setAccountsExpanded((value) => !value)}
-            accountsContent={
-              <>
-                <div className="account-grid">
-                  {accounts.map((a) => (
-                    <article className="account-card" key={a.id}>
-                      <div className="account-card-top">
-                        <span className={"platform large " + a.platform}>
-                          <PlatformIcon platform={a.platform} />
-                        </span>
-                        <span className={"state-pill " + a.state}>
-                          {a.state === "connected"
-                            ? "Подключено"
-                            : a.state === "offline"
-                              ? "Нет связи"
-                              : "Не настроено"}
-                        </span>
-                      </div>
-                      <h2 className="account-display-name">
-                        <StoreBadge name={a.name} color={a.color} />
-                      </h2>
-                      <p className="account-platform-label">
-                        {a.platform === "telegram" ? "Telegram" : "Instagram"} ·{" "}
-                        {a.state === "connected"
-                          ? "Готов к работе"
-                          : "Требует внимания"}
-                      </p>
-                      <details className="account-details">
-                        <summary>Настройка подключения</summary>
-                        <AccountName account={a} onSaved={refresh} />
-                        <p>
+          <Suspense
+            fallback={<p className="page-content">Загружаем настройки…</p>}
+          >
+            <SettingsView
+              accountsExpanded={accountsExpanded}
+              onToggleAccounts={() => setAccountsExpanded((value) => !value)}
+              accountsContent={
+                <>
+                  <div className="account-grid">
+                    {accounts.map((a) => (
+                      <article className="account-card" key={a.id}>
+                        <div className="account-card-top">
+                          <span className={"platform large " + a.platform}>
+                            <PlatformIcon platform={a.platform} />
+                          </span>
+                          <span className={"state-pill " + a.state}>
+                            {a.state === "connected"
+                              ? "Подключено"
+                              : a.state === "offline"
+                                ? "Нет связи"
+                                : "Не настроено"}
+                          </span>
+                        </div>
+                        <h2 className="account-display-name">
+                          <StoreBadge name={a.name} color={a.color} />
+                        </h2>
+                        <p className="account-platform-label">
                           {a.platform === "telegram" ? "Telegram" : "Instagram"}{" "}
                           ·{" "}
-                          {a.mode === "demo"
-                            ? "Демонстрация"
-                            : "Реальное подключение"}
+                          {a.state === "connected"
+                            ? "Готов к работе"
+                            : "Требует внимания"}
                         </p>
-                        <dl>
-                          <dt>Адаптер</dt>
-                          <dd>
-                            {a.adapter === "demo"
-                              ? "Демонстрационный"
-                              : a.adapter === "telegram-mtproto"
-                                ? "Telegram MTProto"
-                                : a.adapter === "instagram-graph"
-                                  ? "Instagram · Meta API"
-                                  : "Не выбран"}
-                          </dd>
-                          <dt>Синхронизация</dt>
-                          <dd>
-                            {a.lastSync
-                              ? `${date(a.lastSync)}, ${time(a.lastSync)}`
-                              : "Ещё не выполнялась"}
-                          </dd>
-                          <dt>Возможности</dt>
-                          <dd>
-                            {a.capabilities.text
-                              ? a.capabilities.images
-                                ? "Текст, фото, сохранённая история"
-                                : "Текст, сохранённая история"
-                              : "Ожидают выбора API"}
-                          </dd>
-                        </dl>
-                        {a.error && <p className="error">{a.error}</p>}
-                        {mode === "real" && a.platform === "telegram" && (
-                          <TelegramConnect
-                            accountId={a.id}
-                            active={page === "settings" && accountsExpanded}
-                            onChange={() => void refresh().catch(report)}
-                          />
-                        )}
-                        {mode === "real" && a.platform === "instagram" && (
-                          <div className="instagram-connect">
-                            <p>
-                              {a.receiveMode === "webhook"
-                                ? a.webhookConfigured
-                                  ? "Приём через вебхуки Meta. Фоновая загрузка списка чатов отключена. История выбранного диалога — до 10 сообщений по запросу."
-                                  : "Фоновая загрузка отключена. Для новых сообщений нужно завершить настройку вебхуков Meta. Сохранённые чаты доступны."
-                                : "Проверка новых сообщений каждые 5 секунд: до 50 диалогов и 30 сообщений при открытии."}{" "}
-                              Текстовые ответы — в течение 24 часов после
-                              сообщения клиента. Фото и видео открываются в
-                              чате; недоступные вложения — в Instagram.
-                            </p>
+                        <details className="account-details">
+                          <summary>Настройка подключения</summary>
+                          <AccountName account={a} onSaved={refresh} />
+                          <p>
+                            {a.platform === "telegram"
+                              ? "Telegram"
+                              : "Instagram"}{" "}
+                            ·{" "}
+                            {a.mode === "demo"
+                              ? "Демонстрация"
+                              : "Реальное подключение"}
+                          </p>
+                          <dl>
+                            <dt>Адаптер</dt>
+                            <dd>
+                              {a.adapter === "demo"
+                                ? "Демонстрационный"
+                                : a.adapter === "telegram-mtproto"
+                                  ? "Telegram MTProto"
+                                  : a.adapter === "instagram-graph"
+                                    ? "Instagram · Meta API"
+                                    : "Не выбран"}
+                            </dd>
+                            <dt>Синхронизация</dt>
+                            <dd>
+                              {a.lastSync
+                                ? `${date(a.lastSync)}, ${time(a.lastSync)}`
+                                : "Ещё не выполнялась"}
+                            </dd>
+                            <dt>Возможности</dt>
+                            <dd>
+                              {a.capabilities.text
+                                ? a.capabilities.images
+                                  ? "Текст, фото, сохранённая история"
+                                  : "Текст, сохранённая история"
+                                : "Ожидают выбора API"}
+                            </dd>
+                          </dl>
+                          {a.error && <p className="error">{a.error}</p>}
+                          {mode === "real" && a.platform === "telegram" && (
+                            <TelegramConnect
+                              accountId={a.id}
+                              active={page === "settings" && accountsExpanded}
+                              onChange={() => void refresh().catch(report)}
+                            />
+                          )}
+                          {mode === "real" && a.platform === "instagram" && (
+                            <div className="instagram-connect">
+                              <p>
+                                {a.receiveMode === "webhook"
+                                  ? a.webhookConfigured
+                                    ? "Приём через вебхуки Meta. Фоновая загрузка списка чатов отключена. История выбранного диалога — до 10 сообщений по запросу."
+                                    : "Фоновая загрузка отключена. Для новых сообщений нужно завершить настройку вебхуков Meta. Сохранённые чаты доступны."
+                                  : "Проверка новых сообщений каждые 5 секунд: до 50 диалогов и 30 сообщений при открытии."}{" "}
+                                Текстовые ответы — в течение 24 часов после
+                                сообщения клиента. Фото и видео открываются в
+                                чате; недоступные вложения — в Instagram.
+                              </p>
+                              <button
+                                className="secondary"
+                                onClick={() =>
+                                  action(() =>
+                                    api("/instagram/sync", "POST", {
+                                      accountId: a.id,
+                                    }),
+                                  )
+                                }
+                              >
+                                {a.receiveMode === "webhook"
+                                  ? "Проверить подключение"
+                                  : "Обновить Instagram"}
+                              </button>
+                              <button
+                                className="secondary"
+                                disabled={a.recentImport?.state === "running"}
+                                onClick={() =>
+                                  action(() =>
+                                    api("/instagram/import-recent", "POST", {
+                                      accountId: a.id,
+                                    }),
+                                  )
+                                }
+                              >
+                                {a.recentImport?.state === "running"
+                                  ? `Загружаем: ${a.recentImport.imported} из 50…`
+                                  : "Загрузить 50 последних чатов"}
+                              </button>
+                              {a.recentImport?.error && (
+                                <p className="error">{a.recentImport.error}</p>
+                              )}
+                            </div>
+                          )}
+                          {mode === "demo" && (
                             <button
                               className="secondary"
                               onClick={() =>
                                 action(() =>
-                                  api("/instagram/sync", "POST", {
-                                    accountId: a.id,
-                                  }),
+                                  api(
+                                    `/demo/accounts/${a.id}/toggle`,
+                                    "POST",
+                                    {},
+                                  ),
                                 )
                               }
                             >
-                              {a.receiveMode === "webhook"
-                                ? "Проверить подключение"
-                                : "Обновить Instagram"}
+                              {a.state === "connected"
+                                ? "Симулировать потерю связи"
+                                : "Восстановить подключение"}
                             </button>
-                            <button
-                              className="secondary"
-                              disabled={a.recentImport?.state === "running"}
-                              onClick={() =>
-                                action(() =>
-                                  api("/instagram/import-recent", "POST", {
-                                    accountId: a.id,
-                                  }),
-                                )
-                              }
-                            >
-                              {a.recentImport?.state === "running"
-                                ? `Загружаем: ${a.recentImport.imported} из 50…`
-                                : "Загрузить 50 последних чатов"}
-                            </button>
-                            {a.recentImport?.error && (
-                              <p className="error">{a.recentImport.error}</p>
-                            )}
-                          </div>
-                        )}
-                        {mode === "demo" && (
-                          <button
-                            className="secondary"
-                            onClick={() =>
-                              action(() =>
-                                api(
-                                  `/demo/accounts/${a.id}/toggle`,
-                                  "POST",
-                                  {},
-                                ),
-                              )
-                            }
-                          >
-                            {a.state === "connected"
-                              ? "Симулировать потерю связи"
-                              : "Восстановить подключение"}
-                          </button>
-                        )}
-                      </details>
-                    </article>
-                  ))}
-                </div>
-                <div className="note">
-                  <Info size={20} />
-                  <p>
-                    {mode === "demo"
-                      ? "Демонстрационный адаптер работает только локально. Сообщения не уходят во внешние сервисы."
-                      : "Подключите каждый Telegram-аккаунт отдельно. Диалоги и ответы привязаны к выбранному аккаунту. Instagram принимает сообщения через вебхуки Meta."}
-                  </p>
-                </div>
-              </>
-            }
-            ownerName={ownerName}
-            online={online}
-            mode={mode}
-            sound={notificationSound}
-            onSaveOwner={async (name) => {
-              await api("/settings", "PUT", { ownerName: name });
-              setOwnerName(name);
-            }}
-            onLogout={localAccess ? undefined : () => setLogoutOpen(true)}
-          />
+                          )}
+                        </details>
+                      </article>
+                    ))}
+                  </div>
+                  <div className="note">
+                    <Info size={20} />
+                    <p>
+                      {mode === "demo"
+                        ? "Демонстрационный адаптер работает только локально. Сообщения не уходят во внешние сервисы."
+                        : "Подключите каждый Telegram-аккаунт отдельно. Диалоги и ответы привязаны к выбранному аккаунту. Instagram принимает сообщения через вебхуки Meta."}
+                    </p>
+                  </div>
+                </>
+              }
+              ownerName={ownerName}
+              online={online}
+              mode={mode}
+              sound={notificationSound}
+              onSaveOwner={async (name) => {
+                await api("/settings", "PUT", { ownerName: name });
+                setOwnerName(name);
+              }}
+              onLogout={localAccess ? undefined : () => setLogoutOpen(true)}
+            />
+          </Suspense>
         )}
       </main>
       {logoutOpen && (

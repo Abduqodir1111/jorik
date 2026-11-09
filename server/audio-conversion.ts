@@ -2,12 +2,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { mediaGate } from "./media-gate.js";
 const run = promisify(execFile);
 // Callers serialize conversion; fixed local paths only, no URLs or user arguments.
-export async function compatibleAudio(
-  source: string,
-  target: string,
-): Promise<Buffer> {
+async function convertAudio(source: string, target: string): Promise<Buffer> {
   try {
     return await fs.readFile(target);
   } catch (e) {
@@ -55,4 +53,11 @@ export async function compatibleAudio(
   } finally {
     await fs.rm(temp, { force: true });
   }
+}
+
+export function compatibleAudio(
+  source: string,
+  target: string,
+): Promise<Buffer> {
+  return mediaGate(() => convertAudio(source, target));
 }

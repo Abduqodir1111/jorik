@@ -1,3 +1,4 @@
+import { uploadArchiveTelegram } from "./archive-telegram-upload.js";
 import { gunzipSync } from "node:zlib";
 import {
   richMedia,
@@ -1531,6 +1532,74 @@ export class TelegramIntegration {
               .messages(m.conversationId)
               .find((x) => x.id === m.replyToId)?.externalId
           : undefined;
+        const archive = this.store.db
+          .prepare(
+            "SELECT file,size,duration,width,height FROM archive_jobs WHERE message_id=? AND conversation_id=?",
+          )
+          .get(m.id, m.conversationId) as
+          | {
+              file: string;
+              size: number;
+              duration: number;
+              width: number;
+              height: number;
+            }
+          | undefined;
+        if (archive) {
+          let uploaded: Api.InputFile | Api.InputFileBig;
+          try {
+            uploaded = await uploadArchiveTelegram(
+              this.client!,
+              archive.file,
+              archive.size,
+            );
+          } catch {
+            throw new SendFailure(
+              "Не удалось загрузить видео в Telegram. Сообщение не отправлено.",
+            );
+          }
+          try {
+            const result = await this.client!.invoke(
+              new Api.messages.SendMedia({
+                peer: this.peer(conv.externalId),
+                randomId: bigInt(random),
+                message: "",
+                media: new Api.InputMediaUploadedDocument({
+                  file: uploaded,
+                  mimeType: "video/mp4",
+                  attributes: [
+                    new Api.DocumentAttributeFilename({
+                      fileName: "review.mp4",
+                    }),
+                    new Api.DocumentAttributeVideo({
+                      duration: archive.duration,
+                      w: archive.width,
+                      h: archive.height,
+                      supportsStreaming: true,
+                    }),
+                  ],
+                }),
+              }),
+            );
+            if (
+              result instanceof Api.Updates ||
+              result instanceof Api.UpdatesCombined
+            ) {
+              for (const u of result.updates)
+                if (
+                  u instanceof Api.UpdateMessageID &&
+                  u.randomId?.toString() === random
+                )
+                  return { externalId: String(u.id) };
+            }
+            throw new Error("No confirmation");
+          } catch {
+            throw new SendFailure(
+              "Нет подтверждения отправки видео. Проверьте Telegram перед повтором.",
+              true,
+            );
+          }
+        }
         if (m.attachments.length) {
           const id = m.attachments[0].url.split("/").at(-1);
           const upload = this.store.db

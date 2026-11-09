@@ -1,3 +1,4 @@
+import { createReadStream } from "node:fs";
 import { recoveryDelay, logRecovery } from "./integration-recovery.js";
 import { reconcileInstagramMessage } from "./instagram-message-key.js";
 import { Readable } from "node:stream";
@@ -1183,7 +1184,76 @@ export class InstagramIntegration {
       let message: unknown = {
         text: target ? `↪ ${target.text.slice(0, 160)}\n\n${m.text}` : m.text,
       };
-      if (m.attachments.length) {
+      const archive = this.store.db
+        .prepare(
+          "SELECT file,size FROM archive_jobs WHERE message_id=? AND conversation_id=?",
+        )
+        .get(m.id, m.conversationId) as
+        { file: string; size: number } | undefined;
+      if (archive) {
+        const boundary = "jorik-" + randomUUID();
+        const fields = {
+          platform: "instagram",
+          message: JSON.stringify({
+            attachment: { type: "video", payload: { is_reusable: true } },
+          }),
+        };
+        const prefix =
+          Object.entries(fields)
+            .map(
+              ([key, value]) =>
+                `--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`,
+            )
+            .join("") +
+          `--${boundary}\r\nContent-Disposition: form-data; name="filedata"; filename="review.mp4"\r\nContent-Type: video/mp4\r\n\r\n`;
+        const suffix = `\r\n--${boundary}--\r\n`;
+        const file = createReadStream(archive.file);
+        async function* body() {
+          yield prefix;
+          for await (const chunk of file) yield chunk;
+          yield suffix;
+        }
+        try {
+          const response = await (this.opts.fetcher ?? fetch)(
+            `https://graph.facebook.com/v25.0/${this.pageId}/message_attachments`,
+            {
+              method: "POST",
+              redirect: "error",
+              headers: {
+                Authorization: "Bearer " + this.opts.token,
+                "Content-Type": "multipart/form-data; boundary=" + boundary,
+                "Content-Length": String(
+                  Buffer.byteLength(prefix) +
+                    archive.size +
+                    Buffer.byteLength(suffix),
+                ),
+              },
+              body: body(),
+              duplex: "half",
+              signal: AbortSignal.any([
+                this.controller.signal,
+                AbortSignal.timeout(120000),
+              ]),
+            } as unknown as RequestInit,
+          );
+          const data = (await response.json()) as any;
+          if (!response.ok || !data.attachment_id)
+            throw new Error("Upload rejected");
+          message = {
+            attachment: {
+              type: "video",
+              payload: { attachment_id: data.attachment_id },
+            },
+          };
+        } catch {
+          throw new SendFailure(
+            "Не удалось загрузить видео в Instagram. Сообщение не отправлено.",
+          );
+        } finally {
+          file.destroy();
+        }
+      }
+      if (m.attachments.length && !archive) {
         if (m.replyToId)
           throw new SendFailure(
             "В Instagram отправьте изображение отдельно от цитаты.",

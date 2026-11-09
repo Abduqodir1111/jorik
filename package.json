@@ -18,6 +18,7 @@
     "telegram:prepare": "tsx scripts/prepare-telegram.ts"
   },
   "dependencies": {
+    "@fastify/compress": "^9.3.0",
     "@fastify/cookie": "^11.1.5",
     "@fastify/rate-limit": "^11.2.1",
     "@fastify/static": "^10.1.8",
@@ -25,7 +26,9 @@
     "big-integer": "^1.6.52",
     "dotenv": "^18.0.9",
     "exceljs": "^4.4.0",
+    "fast-xml-parser": "^5.12.0",
     "fastify": "^5.12.7",
+    "fuse.js": "^7.5.0",
     "lottie-web": "^5.13.0",
     "lucide-react": "^1.63.0",
     "react": "^19.3.1",

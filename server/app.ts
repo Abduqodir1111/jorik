@@ -1,3 +1,5 @@
+import compress from "@fastify/compress";
+import { registerArchive, type ArchiveOptions } from "./archive-routes.js";
 import { MAX_QUICK_REPLIES } from "../shared/quick-replies.js";
 import { registerProfilePhotos } from "./profile-photos.js";
 import { PushService, loadVapid, type PushOptions } from "./push.js";
@@ -27,6 +29,7 @@ export async function createApp(opts: {
   localAccess?: boolean;
   publicBaseUrl?: string;
   disableRateLimit?: boolean;
+  archive?: ArchiveOptions;
   push?: PushOptions;
   telegram?: TelegramOptions;
   instagram?: InstagramOptions;
@@ -52,6 +55,12 @@ export async function createApp(opts: {
       .type("text/html; charset=utf-8")
       .send(readFileSync(path.resolve("public/data-deletion.html"), "utf8")),
   );
+  await app.register(compress, {
+    encodings: ["gzip"],
+    threshold: 1024,
+    globalCompression: true,
+    globalDecompression: false,
+  });
   await app.register(cookie);
   const rememberedSessionSeconds = 365 * 86400;
   const sessionCookie = {
@@ -665,7 +674,16 @@ export async function createApp(opts: {
     "/api/conversations/:id/messages",
     async (req) => {
       store.conversation(req.params.id);
-      return store.messages(req.params.id);
+      const query = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(100).optional(),
+          before: z.string().uuid().optional(),
+        })
+        .parse(req.query);
+      return store.messages(
+        req.params.id,
+        query.limit ? { limit: query.limit, before: query.before } : undefined,
+      );
     },
   );
   app.put<{ Params: { id: string } }>(
@@ -689,6 +707,7 @@ export async function createApp(opts: {
       return { ok: true };
     },
   );
+  const archive = registerArchive(app, store, opts.dataDir, opts.archive);
   registerOrders(app, store);
   registerProfilePhotos(app, store, async (id) => {
     const c = store.conversation(id),
@@ -896,7 +915,7 @@ export async function createApp(opts: {
       return { ok: true };
     },
   );
-  app.get("/api/events", async (req, reply) => {
+  app.get("/api/events", { compress: false }, async (req, reply) => {
     reply.hijack();
     const renewedCookie = reply.getHeader("set-cookie");
     if (renewedCookie) reply.raw.setHeader("Set-Cookie", renewedCookie);
@@ -926,7 +945,17 @@ export async function createApp(opts: {
     index: false,
   });
   if (existsSync(path.resolve("dist"))) {
-    await app.register(staticFiles, { root: path.resolve("dist") });
+    await app.register(staticFiles, {
+      root: path.resolve("dist"),
+      setHeaders(res, file) {
+        res.header(
+          "Cache-Control",
+          /[/\\]assets[/\\].+-[a-zA-Z0-9_-]+\.(js|css)$/.test(file)
+            ? "public, max-age=604800, immutable"
+            : "no-cache",
+        );
+      },
+    });
     app.setNotFoundHandler((req, reply) =>
       req.url.startsWith("/api/")
         ? reply.code(404).send({ error: "Маршрут не найден" })
@@ -961,5 +990,5 @@ export async function createApp(opts: {
     while (store.busy) await new Promise((r) => setTimeout(r, 10));
     db.close();
   });
-  return { app, store, db };
+  return { app, store, db, archive };
 }
