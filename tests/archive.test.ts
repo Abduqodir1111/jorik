@@ -242,7 +242,7 @@ test("OPDS rejects external acquisition paths/entities/redirects and streams boo
   ]);
   await assert.rejects(service.download("//evil.example"));
   await assert.rejects(service.download("/b/1/epub?next=evil"));
-  const stream = await service.download("/b/123/epub");
+  const { stream } = await service.download("/b/123/epub");
   let text = "";
   for await (const part of stream) text += part.toString();
   assert.equal(text, "book-data");
@@ -576,4 +576,82 @@ test("Gzip leaves SSE unbuffered and static cache policy preserves authenticated
     await app.close();
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+test(
+  "DSM cold login exceeding ten seconds succeeds and uses the current entry endpoint",
+  { timeout: 16000 },
+  async () => {
+    const dir = await temp(),
+      { app, db } = await createApp({
+        mode: "demo",
+        dataDir: dir,
+        worker: false,
+      });
+    const sharing = new SynologySharing(db, {
+      url: "https://example.com:5001",
+      username: "service",
+      password: "test-only",
+      fetcher: (async (url, opts) => {
+        assert.equal(new URL(String(url)).pathname, "/webapi/entry.cgi");
+        const p = opts?.body as URLSearchParams;
+        if (p.get("api") === "SYNO.API.Auth") {
+          await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(resolve, 11000);
+            opts?.signal?.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(timer);
+                reject(opts.signal?.reason);
+              },
+              { once: true },
+            );
+          });
+          return Response.json({
+            success: true,
+            data: { sid: "test-session" },
+          });
+        }
+        return Response.json({
+          success: true,
+          data: { links: [{ url: "https://gofile.me/test-only" }] },
+        });
+      }) as typeof fetch,
+    });
+    try {
+      assert.equal(
+        await sharing.get("/Storebooks/Books/Example"),
+        "https://gofile.me/test-only",
+      );
+    } finally {
+      await app.close();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  },
+);
+test("OPDS supports the provider fixed /opds download suffix, same-origin absolute links and zipped FB2", async () => {
+  const xml =
+    '<feed><entry><id>one</id><title>Public domain</title><author><name>Author</name></author><link rel="http://opds-spec.org/acquisition/open-access" href="/b/123/fb2/opds"/><link rel="http://opds-spec.org/acquisition/open-access" href="https://example.com/b/123/epub/opds"/><link rel="http://opds-spec.org/acquisition/open-access" href="https://evil.example/b/123/mobi/opds"/></entry></feed>';
+  const service = new ArchiveOPDS("https://example.com", (async (url) =>
+    new URL(String(url)).pathname.startsWith("/opds/")
+      ? new Response(xml)
+      : new Response("zip-data", {
+          headers: { "Content-Type": "application/zip" },
+        })) as typeof fetch);
+  const books = await service.search("title");
+  assert.deepEqual(books[0].formats, [
+    { ext: "fb2", downloadPath: "/b/123/fb2/opds" },
+    { ext: "epub", downloadPath: "/b/123/epub/opds" },
+  ]);
+  const { stream, extension } = await service.download("/b/123/fb2/opds");
+  assert.equal(extension, "fb2.zip");
+  let text = "";
+  for await (const chunk of stream) text += chunk.toString();
+  assert.equal(text, "zip-data");
+  await assert.rejects(service.download("/b/123/fb2/opds/../../secret"));
+  const html = new ArchiveOPDS(
+    "https://example.com",
+    (async () =>
+      new Response("<html><body>Unavailable</body></html>")) as typeof fetch,
+  );
+  await assert.rejects(html.search("title"), /OPDS/);
 });

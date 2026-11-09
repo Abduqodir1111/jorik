@@ -15,16 +15,16 @@ export class SynologySharing {
   ) {}
   private async call(params: Record<string, string>) {
     const response = await (this.opts.fetcher || fetch)(
-      new URL(
-        params.api === "SYNO.API.Auth"
-          ? "/webapi/auth.cgi"
-          : "/webapi/entry.cgi",
-        this.opts.url,
-      ),
+      new URL("/webapi/entry.cgi", this.opts.url),
       {
         method: "POST",
         body: new URLSearchParams(params),
-        signal: AbortSignal.timeout(10000),
+        // Cold DSM authentication on the 1 GB NAS takes ~20s; file calls stay bounded separately.
+        signal: AbortSignal.timeout(
+          params.api === "SYNO.API.Auth" && params.method === "login"
+            ? 35000
+            : 15000,
+        ),
         redirect: "error",
       },
     );

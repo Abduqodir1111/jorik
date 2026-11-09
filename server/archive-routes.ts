@@ -175,7 +175,7 @@ export function registerArchive(
           title: z.string().max(400).default("Книга"),
         })
         .parse(req.query);
-      const stream = await opds.download(q.path);
+      const { stream, extension } = await opds.download(q.path);
       const title =
         q.title
           .replace(/[\x00-\x1f\x7f/\\"<>:|?*]/g, " ")
@@ -185,7 +185,7 @@ export function registerArchive(
         .type("application/octet-stream")
         .header(
           "Content-Disposition",
-          `attachment; filename="book.${q.path.split("/").at(-1)}"; filename*=UTF-8''${encodeURIComponent(title + "." + q.path.split("/").at(-1)).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16))}`,
+          `attachment; filename="book.${extension}"; filename*=UTF-8''${encodeURIComponent(title + "." + extension).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16))}`,
         )
         .send(stream);
     },

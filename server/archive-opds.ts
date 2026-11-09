@@ -3,7 +3,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { Readable, Transform } from "node:stream";
 import type { ArchiveBook } from "../shared/archive.js";
-const downloadPath = /^\/b\/\d+\/(fb2|epub|mobi|pdf|djvu)$/;
+const downloadPath = /^\/b\/\d+\/(fb2|epub|mobi|pdf|djvu)(?:\/opds)?$/;
 export class ArchiveOPDS {
   constructor(
     readonly base: string,
@@ -76,6 +76,24 @@ export class ArchiveOPDS {
         String(jpath).endsWith(".link") ||
         String(jpath).endsWith(".author"),
     }).parse(xml);
+    if (!parsed.feed)
+      throw new Error("Каталог вернул страницу вместо OPDS. Повторите позже.");
+    const format = (l: any) => {
+      if (
+        l.rel !== "http://opds-spec.org/acquisition/open-access" ||
+        typeof l.href !== "string"
+      )
+        return null;
+      try {
+        const u = new URL(l.href, this.base);
+        if (u.origin !== new URL(this.base).origin || u.search || u.hash)
+          return null;
+        const match = u.pathname.match(downloadPath);
+        return match ? { ext: match[1], downloadPath: u.pathname } : null;
+      } catch {
+        return null;
+      }
+    };
     const text = (v: any): string =>
       typeof v === "string"
         ? v
@@ -91,22 +109,13 @@ export class ArchiveOPDS {
           .map((a: any) => text(a.name))
           .join(", ")
           .slice(0, 300),
-        formats: (e.link || [])
-          .filter(
-            (l: any) =>
-              l.rel === "http://opds-spec.org/acquisition/open-access" &&
-              typeof l.href === "string" &&
-              downloadPath.test(l.href),
-          )
-          .map((l: any) => ({
-            ext: l.href.split("/").at(-1),
-            downloadPath: l.href,
-          })),
+        formats: (e.link || []).map(format).filter(Boolean),
       }))
       .filter((e: ArchiveBook) => e.formats.length);
   }
   async download(p: string) {
     if (!downloadPath.test(p)) throw new Error("Недопустимый формат книги");
+    const match = p.match(downloadPath)!;
     const r = await this.request(p);
     if (/text\/html/i.test(r.headers.get("content-type") || "")) {
       await r.body!.cancel();
@@ -125,6 +134,15 @@ export class ArchiveOPDS {
     const source = Readable.fromWeb(r.body! as any);
     source.on("error", (e) => limiter.destroy(e));
     limiter.on("close", () => source.destroy());
-    return source.pipe(limiter);
+    const type = (r.headers.get("content-type") || "")
+      .split(";")[0]
+      .toLowerCase();
+    const extension =
+      match[1] +
+      (["application/zip", "application/x-zip-compressed"].includes(type) &&
+      match[1] !== "epub"
+        ? ".zip"
+        : "");
+    return { stream: source.pipe(limiter), extension };
   }
 }

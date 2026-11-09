@@ -92,7 +92,23 @@ export default function ArchiveSearch({
         undefined,
         controller.signal,
       )
-        .then(setEntries)
+        .then(async (matches) => {
+          setEntries(matches);
+          if (
+            !matches.length &&
+            status?.updatedAt &&
+            !controller.signal.aborted
+          ) {
+            setBookQuery(q.trim());
+            setBooks(
+              await request<ArchiveBook[]>(
+                "/flibusta/search?q=" + encodeURIComponent(q.trim()),
+                undefined,
+                controller.signal,
+              ),
+            );
+          }
+        })
         .catch((e) => {
           if (!controller.signal.aborted) setError(e.message);
         })
@@ -104,7 +120,7 @@ export default function ArchiveSearch({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [q, active]);
+  }, [q, active, status?.updatedAt]);
   useEffect(() => {
     if (!job || !["preparing", "queued", "sending"].includes(job.state)) return;
     const controller = new AbortController();
