@@ -237,3 +237,40 @@ test(
     }
   },
 );
+
+test(
+  "Video preparation reports ffmpeg timestamps and marks 100 only after a valid prepared file",
+  { timeout: 30000 },
+  async () => {
+    const f = await fixture();
+    let video: ArchiveVideo | undefined;
+    const progress: (number | null)[] = [];
+    try {
+      await run("ffmpeg", [
+        "-v",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=s=160x240:d=2:r=10",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        f.source,
+      ]);
+      await f.index.build();
+      video = new ArchiveVideo(f.index, f.cache, "ffmpeg", "ffprobe", {
+        onProgress: (p) => progress.push(p),
+      });
+      const result = await video.prepare(f.index.list()[0].id);
+      assert.equal(progress[0], null);
+      assert.equal(progress.at(-1), 100);
+      assert.ok(progress.some((p) => p !== null && p > 0 && p < 100));
+      assert.ok(result.size > 0);
+    } finally {
+      await video?.close();
+      await fs.rm(f.dir, { recursive: true, force: true });
+    }
+  },
+);

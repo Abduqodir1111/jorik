@@ -1,8 +1,17 @@
+import VideoProgress from "./VideoProgress";
+import type { ArchiveJob } from "../shared/archive";
 import { useState } from "react";
 import type { Attachment } from "../shared/types";
-export default function Video({ attachment }: { attachment: Attachment }) {
+export default function Video({
+  attachment,
+  job,
+}: {
+  attachment: Attachment;
+  job?: ArchiveJob;
+}) {
   const [failed, setFailed] = useState(false),
     [attempt, setAttempt] = useState(0);
+  if (job && job.state !== "sent") return <VideoProgress job={job} />;
   return (
     <div className="video-attachment">
       {failed ? (

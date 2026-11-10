@@ -8,6 +8,7 @@ export async function uploadArchiveTelegram(
   client: Pick<TelegramClient, "invoke">,
   file: string,
   size: number,
+  progress?: (bytes: number, total: number) => void,
 ) {
   if (size <= 0 || size > 18 * 1024 * 1024 || (await stat(file)).size !== size)
     throw new Error("Размер видео изменился");
@@ -35,6 +36,11 @@ export async function uploadArchiveTelegram(
     );
     if (!ok) throw new Error("Telegram не подтвердил часть видео");
     part++;
+    try {
+      progress?.(bytes, size);
+    } catch {
+      /* Telemetry must not interrupt an upload. */
+    }
   }
   if (bytes !== size || part !== parts)
     throw new Error("Видео изменилось при загрузке");

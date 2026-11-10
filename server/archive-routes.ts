@@ -1,3 +1,4 @@
+import { archiveProgress } from "./archive-progress.js";
 import { ArchivePdfMetadata } from "./archive-pdf.js";
 import os from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
@@ -11,7 +12,6 @@ import { registerArchiveFiles } from "./archive-files.js";
 import { ArchiveOPDS } from "./archive-opds.js";
 import { SynologySharing, type SynologyOptions } from "./archive-synology.js";
 import type { Store } from "./store.js";
-import type { ArchiveJob } from "../shared/archive.js";
 import path from "node:path";
 export interface ArchiveOptions {
   roots: ArchiveRoot[];
@@ -25,7 +25,20 @@ export function registerArchive(
   opts?: ArchiveOptions,
 ) {
   const index = new ArchiveIndex(opts?.roots || []);
-  const video = new ArchiveVideo(index, path.join(dataDir, "archive-cache"));
+  const progress = archiveProgress(store);
+  let progressJob: string | undefined;
+  const video = new ArchiveVideo(
+    index,
+    path.join(dataDir, "archive-cache"),
+    undefined,
+    undefined,
+    {
+      onProgress: (percent) => {
+        if (progressJob && !stopped)
+          progress.update(progressJob, { phase: "preparing", percent });
+      },
+    },
+  );
   const pdfMetadata = new ArchivePdfMetadata(
     path.join(dataDir, "archive-pdf-metadata.json"),
   );
@@ -42,21 +55,7 @@ export function registerArchive(
     scan: Promise<unknown> | undefined,
     activeJob: Promise<void> | undefined;
   const query = z.object({ q: z.string().trim().min(2).max(200) });
-  const getJob = (id: string): ArchiveJob => {
-    const row = store.db
-      .prepare(
-        "SELECT j.id,j.state,j.error,j.message_id AS messageId,m.status,m.error AS messageError FROM archive_jobs j LEFT JOIN messages m ON m.id=j.message_id WHERE j.id=?",
-      )
-      .get(id) as any;
-    if (!row)
-      throw Object.assign(new Error("Задача не найдена"), { statusCode: 404 });
-    return {
-      id: row.id,
-      state: row.status || row.state,
-      error: row.messageError || row.error,
-      messageId: row.messageId,
-    };
-  };
+  const getJob = progress.get;
   const tick = async () => {
     if (stopped || activeJob || !index.updatedAt) return;
     activeJob = (async () => {
@@ -67,6 +66,8 @@ export function registerArchive(
         .get() as any;
       if (!row) return;
       try {
+        progressJob = row.id;
+        progress.update(row.id, { phase: "preparing", percent: null }, true);
         const v = await video.prepare(row.entry_id, true);
         if (stopped) return;
         store.db.transaction(() => {
@@ -87,6 +88,11 @@ export function registerArchive(
             )
             .run(messageId, row.id);
         })();
+        progress.update(
+          row.id,
+          { phase: "queued", percent: null, totalBytes: v.size },
+          true,
+        );
         store.changed();
       } catch (e) {
         if (!stopped)
@@ -96,6 +102,10 @@ export function registerArchive(
               e instanceof Error ? e.message : "Не удалось подготовить видео",
               row.id,
             );
+        if (!stopped)
+          progress.update(row.id, { phase: "error", percent: null }, true);
+      } finally {
+        progressJob = undefined;
       }
     })().finally(() => {
       activeJob = undefined;
@@ -283,7 +293,20 @@ export function registerArchive(
       attachments: [],
     };
     store.resolveAdapter(a).validateReply(a, preview);
-    await index.get(b.id, "video");
+    const entry = await index.get(b.id, "video");
+    // index.get touches disk: another request may have inserted the same intent
+    // during that await. Recheck before the synchronous insert.
+    const raced = store.db
+      .prepare(
+        "SELECT id,conversation_id,entry_id FROM archive_jobs WHERE idempotency_key=?",
+      )
+      .get(b.idempotencyKey) as any;
+    if (raced) {
+      if (raced.conversation_id !== b.conversationId || raced.entry_id !== b.id)
+        throw new Error("Ключ отправки уже используется");
+      return reply.code(202).send(getJob(raced.id));
+    }
+
     if (
       (
         store.db
@@ -297,11 +320,21 @@ export function registerArchive(
     const id = randomUUID();
     store.db
       .prepare(
-        "INSERT INTO archive_jobs(id,idempotency_key,conversation_id,entry_id,created_at) VALUES(?,?,?,?,?)",
+        "INSERT INTO archive_jobs(id,idempotency_key,conversation_id,entry_id,created_at,name,updated_at) VALUES(?,?,?,?,?,?,?)",
       )
-      .run(id, b.idempotencyKey, b.conversationId, b.id, Date.now());
+      .run(
+        id,
+        b.idempotencyKey,
+        b.conversationId,
+        b.id,
+        Date.now(),
+        entry.name,
+        Date.now(),
+      );
+    store.archiveJobChanged(getJob(id));
     return reply.code(202).send(getJob(id));
   });
+  app.get("/api/archive/jobs", async () => progress.list());
   app.get<{ Params: { id: string } }>("/api/archive/jobs/:id", async (req) =>
     getJob(req.params.id),
   );

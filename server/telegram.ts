@@ -1630,11 +1630,28 @@ export class TelegramIntegration {
         if (archive) {
           let uploaded: Api.InputFile | Api.InputFileBig;
           try {
+            this.store.reportArchiveProgress(m.id, {
+              phase: "uploading",
+              percent: 0,
+              bytesSent: 0,
+              totalBytes: archive.size,
+            });
             uploaded = await uploadArchiveTelegram(
               this.client!,
               archive.file,
               archive.size,
+              (bytes, total) =>
+                this.store.reportArchiveProgress(m.id, {
+                  phase: "uploading",
+                  percent: Math.floor((bytes / total) * 100),
+                  bytesSent: bytes,
+                  totalBytes: total,
+                }),
             );
+            this.store.reportArchiveProgress(m.id, {
+              phase: "confirming",
+              percent: null,
+            });
           } catch {
             throw new SendFailure(
               "Не удалось загрузить видео в Telegram. Сообщение не отправлено.",

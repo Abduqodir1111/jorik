@@ -1,3 +1,4 @@
+import type { ArchiveJob } from "./archive.js";
 export type Mode = "demo" | "real";
 export type Status = "queued" | "sending" | "sent" | "error" | "unknown";
 export interface Capabilities {
@@ -54,6 +55,7 @@ export interface Attachment {
   size: number;
 }
 export interface Message {
+  archiveJob?: ArchiveJob;
   editedAt?: string | null;
   reactions?: { emoji: string; count: number; chosen: boolean }[];
   replyToId?: string | null;

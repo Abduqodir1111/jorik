@@ -1,3 +1,4 @@
+import { videoIntent, confirmVideoIntent } from "./video-intents";
 import { useEffect, useRef, useState } from "react";
 import {
   Search,
@@ -29,7 +30,10 @@ async function request<T>(
     signal,
   });
   const d = await r.json();
-  if (!r.ok) throw new Error(d.error || "Не удалось выполнить запрос");
+  if (!r.ok)
+    throw Object.assign(new Error(d.error || "Не удалось выполнить запрос"), {
+      status: r.status,
+    });
   return d;
 }
 export default function ArchiveSearch({
@@ -37,11 +41,15 @@ export default function ArchiveSearch({
   onClose,
   conversationId,
   chatName,
+  onVideoJob,
+  sendingEntries = [],
 }: {
   open: boolean;
   onClose: () => void;
   conversationId?: string;
   chatName?: string;
+  onVideoJob: (job: ArchiveJob) => void;
+  sendingEntries?: string[];
 }) {
   const [q, setQ] = useState(""),
     [entries, setEntries] = useState<ArchiveEntry[]>([]),
@@ -62,15 +70,8 @@ export default function ArchiveSearch({
   currentQuery.current = q;
   const [bookQuery, setBookQuery] = useState(""),
     [formats, setFormats] = useState<Record<string, string>>({});
-  const [job, setJob] = useState<ArchiveJob | null>(null),
-    [sending, setSending] = useState(false),
-    [target, setTarget] = useState("");
-  const pending = useRef<{
-      entry: string;
-      conversation: string;
-      key: string;
-    } | null>(null),
-    lock = useRef(false);
+  const [sending, setSending] = useState(false);
+  const lock = useRef(false);
   const active = open;
   const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -156,49 +157,52 @@ export default function ArchiveSearch({
       controller.abort();
     };
   }, [q, active, status?.updatedAt]);
-  useEffect(() => {
-    if (!job || !["preparing", "queued", "sending"].includes(job.state)) return;
-    const controller = new AbortController();
-    const timer = setInterval(() => {
-      void request<ArchiveJob>("/jobs/" + job.id, undefined, controller.signal)
-        .then(setJob)
-        .catch(() => {});
-    }, 2000);
-    return () => {
-      clearInterval(timer);
-      controller.abort();
-    };
-  }, [job?.id, job?.state]);
   async function send(entry: ArchiveEntry) {
     if (!conversationId || lock.current) return;
     lock.current = true;
     setSending(true);
     setError("");
-    setTarget(chatName || "Выбранный диалог");
-    const old = pending.current;
-    const intent =
-      old?.entry === entry.id && old.conversation === conversationId
-        ? old
-        : {
-            entry: entry.id,
-            conversation: conversationId,
-            key: crypto.randomUUID(),
-          };
-    pending.current = intent;
+    const intent = videoIntent(entry.id, conversationId);
+    const optimistic: ArchiveJob = {
+      id: intent.key,
+      clientKey: intent.key,
+      conversationId: intent.conversation,
+      entryId: entry.id,
+      name: entry.name,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      state: "preparing",
+      phase: "waiting",
+      percent: null,
+      error: null,
+      messageId: null,
+      local: true,
+    };
+    onVideoJob(optimistic);
+    onClose();
     try {
-      setJob(
-        await request<ArchiveJob>("/send-video", {
+      const accepted = await request<ArchiveJob>(
+        "/send-video",
+        {
           id: intent.entry,
           conversationId: intent.conversation,
           idempotencyKey: intent.key,
-        }),
+        },
+        AbortSignal.timeout(20000),
       );
-      pending.current = null;
+      onVideoJob(accepted);
+      confirmVideoIntent(intent.key);
     } catch (e) {
-      setError(
-        (e instanceof Error ? e.message : "Ошибка отправки") +
-          " При повторе этого действия новая отправка не создаётся.",
-      );
+      const uncertain = !(e instanceof Error && "status" in e);
+      onVideoJob({
+        ...optimistic,
+        state: uncertain ? "unknown" : "error",
+        phase: uncertain ? "unknown" : "error",
+        updatedAt: Date.now(),
+        error:
+          (e instanceof Error ? e.message : "Ошибка отправки") +
+          " При повторе используйте то же видео: повторный запрос не создаёт новую отправку.",
+      });
     } finally {
       lock.current = false;
       setSending(false);
@@ -249,17 +253,7 @@ export default function ArchiveSearch({
     }
   }
   useEffect(() => () => catalogRequest.current?.abort(), []);
-  const busy =
-    sending ||
-    (!!job && ["preparing", "queued", "sending"].includes(job.state));
-  const labels = {
-    preparing: "Подготавливаем видео",
-    queued: "В очереди отправки",
-    sending: "Отправляем",
-    sent: "Видео отправлено",
-    error: "Не удалось отправить",
-    unknown: "Результат неизвестен — проверьте чат у провайдера",
-  };
+  const busy = sending;
   return (
     <>
       <dialog
@@ -345,12 +339,6 @@ export default function ArchiveSearch({
               {error}
             </p>
           )}
-          {job && (
-            <p className={"archive-job " + job.state} role="status">
-              {labels[job.state]} · {target}
-              {job.error && <small>{job.error}</small>}
-            </p>
-          )}
           <div
             className="archive-results"
             aria-busy={loading || catalogLoading}
@@ -396,7 +384,9 @@ export default function ArchiveSearch({
                   </a>
                   {e.type === "video" && (
                     <button
-                      disabled={!conversationId || busy}
+                      disabled={
+                        !conversationId || busy || sendingEntries.includes(e.id)
+                      }
                       onClick={() => void send(e)}
                     >
                       <Send size={14} />В чат
@@ -481,15 +471,8 @@ export default function ArchiveSearch({
           entry={preview}
           chatName={chatName}
           canSend={!!conversationId}
-          busy={busy}
-          sendStatus={
-            job
-              ? labels[job.state] +
-                " · " +
-                target +
-                (job.error ? ": " + job.error : "")
-              : ""
-          }
+          busy={busy || (!!preview && sendingEntries.includes(preview.id))}
+          sendStatus=""
           onSend={() => void send(preview)}
           onClose={() => setPreview(null)}
         />

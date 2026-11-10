@@ -82,9 +82,10 @@ export default memo(function MessageTimeline({
           )}
           <div className={"message-row " + m.direction}>
             <div
-              tabIndex={0}
+              tabIndex={m.archiveJob && m.archiveJob.state !== "sent" ? -1 : 0}
               onPointerDown={(e) => {
                 suppressClick.current = false;
+                if (m.archiveJob && m.archiveJob.state !== "sent") return;
                 if (e.pointerType !== "touch") return;
                 cancelPress();
                 origin.current = { x: e.clientX, y: e.clientY };
@@ -114,10 +115,12 @@ export default memo(function MessageTimeline({
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
+                if (m.archiveJob && m.archiveJob.state !== "sent") return;
                 cancelPress();
                 setContext({ id: m.id, x: e.clientX, y: e.clientY });
               }}
               onKeyDown={(e) => {
+                if (m.archiveJob && m.archiveJob.state !== "sent") return;
                 if (
                   e.key === "ContextMenu" ||
                   (e.shiftKey && e.key === "F10")
@@ -217,7 +220,7 @@ export default memo(function MessageTimeline({
                   ) : att.kind === "image" ? (
                     <Photo attachment={att} />
                   ) : att.kind === "video" ? (
-                    <Video attachment={att} />
+                    <Video attachment={att} job={m.archiveJob} />
                   ) : att.kind === "voice" ? (
                     <VoicePlayer attachment={att} />
                   ) : (
@@ -257,7 +260,9 @@ export default memo(function MessageTimeline({
                   ))}
                 </div>
               )}
-              {m.error && <p className="message-error">{m.error}</p>}
+              {m.error && !m.archiveJob && (
+                <p className="message-error">{m.error}</p>
+              )}
               <span className="message-meta">
                 {m.editedAt && <small>изменено</small>}
                 <time>{time(m.createdAt)}</time>

@@ -7,6 +7,9 @@ import type { OrderContext } from "./Orders";
 const Orders = lazy(() => import("./Orders"));
 import { useNotificationSound } from "./NotificationSound";
 import { useOperator } from "./OperatorContext";
+import { confirmVideoIntent } from "./video-intents";
+import type { ArchiveJob } from "../shared/archive";
+import { archiveTimeline, mergeArchiveJobs } from "./archive-job-state";
 import { ChatCache } from "./chat-cache";
 import { reconcileList } from "./reconcile-list";
 import PlatformIcon from "./PlatformIcon";
@@ -137,6 +140,30 @@ export default function App() {
     [messages, setMessages] = useState<Message[]>([]),
     [selected, setSelected] = useState<string | null>(null),
     [page, setPage] = useState("inbox");
+  const [archiveJobs, setArchiveJobs] = useState<ArchiveJob[]>([]);
+  const acceptArchiveJobs = useCallback((jobs: ArchiveJob[]) => {
+    for (const job of jobs)
+      if (!job.local && job.clientKey) confirmVideoIntent(job.clientKey);
+    setArchiveJobs((old) => mergeArchiveJobs(old, jobs));
+  }, []);
+  const receiveArchiveJob = useCallback(
+    (job: ArchiveJob) => acceptArchiveJobs([job]),
+    [acceptArchiveJobs],
+  );
+  const onVideoJob = useCallback(
+    (job: ArchiveJob) => {
+      receiveArchiveJob(job);
+      if (job.local && job.state === "preparing" && job.conversationId) {
+        setPage("inbox");
+        setSelected(job.conversationId);
+      }
+    },
+    [receiveArchiveJob],
+  );
+  const displayMessages = useMemo(
+    () => archiveTimeline(messages, archiveJobs, selected),
+    [messages, archiveJobs, selected],
+  );
   useEffect(() => {
     setComposerFocused(
       Boolean(
@@ -423,6 +450,11 @@ export default function App() {
         removeMessage(JSON.parse((event as MessageEvent).data));
       } catch {}
     });
+    events.addEventListener("archive-job", (event) => {
+      try {
+        receiveArchiveJob(JSON.parse((event as MessageEvent).data));
+      } catch {}
+    });
     events.addEventListener("incoming", () => notificationSound.play());
     events.addEventListener("orders-changed", () =>
       window.dispatchEvent(new Event("jorik:orders-changed")),
@@ -437,6 +469,8 @@ export default function App() {
       if (!active) return;
       await refresh();
       if (active && selectedRef.current) await history(selectedRef.current);
+      const jobs = await api<ArchiveJob[]>("/archive/jobs");
+      if (active) acceptArchiveJobs(jobs);
     });
     events.onmessage = () => {
       setOnline(true);
@@ -523,7 +557,7 @@ export default function App() {
     container.scrollTop = followLatest.current
       ? container.scrollHeight
       : chatScrollTop.current;
-  }, [messages, selected, historyLoading, page]);
+  }, [displayMessages, selected, historyLoading, page]);
   useLayoutEffect(() => {
     const content = bottom.current?.parentElement;
     const container = content?.parentElement;
@@ -599,6 +633,7 @@ export default function App() {
     chatCache.current?.clear();
     chatCache.current = null;
     cacheMode.current = null;
+    setArchiveJobs([]);
     setSelected(null);
     setMessages([]);
     setLogoutOpen(false);
@@ -1332,7 +1367,7 @@ export default function App() {
                       </button>
                     )}
                     <MessageTimeline
-                      messages={messages}
+                      messages={displayMessages}
                       platform={a.platform}
                       dismissed={dismissed}
                       setDismissed={setDismissed}
@@ -1670,6 +1705,14 @@ export default function App() {
           <ArchiveSearch
             open={archiveOpen}
             onClose={closeArchive}
+            onVideoJob={onVideoJob}
+            sendingEntries={archiveJobs
+              .filter(
+                (j) =>
+                  j.conversationId === c?.id &&
+                  ["preparing", "queued", "sending"].includes(j.state),
+              )
+              .flatMap((j) => (j.entryId ? [j.entryId] : []))}
             conversationId={c?.id}
             chatName={
               c ? `${c.username || c.name} · ${a?.name || ""}` : undefined

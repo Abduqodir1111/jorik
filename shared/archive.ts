@@ -17,6 +17,17 @@ export interface ArchiveFolderContents {
   nextOffset: number | null;
 }
 export interface ArchiveJob {
+  conversationId?: string;
+  entryId?: string;
+  clientKey?: string;
+  name?: string;
+  createdAt?: number;
+  updatedAt?: number;
+  phase?: ArchivePhase;
+  percent?: number | null;
+  bytesSent?: number;
+  totalBytes?: number | null;
+  local?: boolean;
   id: string;
   state: "preparing" | "queued" | "sending" | "sent" | "error" | "unknown";
   error: string | null;
@@ -27,4 +38,20 @@ export interface ArchiveBook {
   title: string;
   author: string;
   formats: { ext: string; downloadPath: string }[];
+}
+
+export type ArchivePhase =
+  | "waiting"
+  | "preparing"
+  | "queued"
+  | "uploading"
+  | "confirming"
+  | "complete"
+  | "error"
+  | "unknown";
+export interface ArchiveProgress {
+  phase: ArchivePhase;
+  percent: number | null;
+  bytesSent?: number;
+  totalBytes?: number | null;
 }

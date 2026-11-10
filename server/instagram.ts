@@ -1206,10 +1206,28 @@ export class InstagramIntegration {
           `--${boundary}\r\nContent-Disposition: form-data; name="filedata"; filename="review.mp4"\r\nContent-Type: video/mp4\r\n\r\n`;
         const suffix = `\r\n--${boundary}--\r\n`;
         const file = createReadStream(archive.file);
+        this.store.reportArchiveProgress(m.id, {
+          phase: "uploading",
+          percent: 0,
+          bytesSent: 0,
+          totalBytes: archive.size,
+        });
+        const reportProgress = this.store.reportArchiveProgress;
         async function* body() {
           yield prefix;
-          for await (const chunk of file) yield chunk;
+          let bytes = 0;
+          for await (const chunk of file) {
+            yield chunk;
+            bytes += chunk.length;
+            reportProgress(m.id, {
+              phase: "uploading",
+              percent: Math.floor((bytes / archive!.size) * 100),
+              bytesSent: bytes,
+              totalBytes: archive!.size,
+            });
+          }
           yield suffix;
+          reportProgress(m.id, { phase: "confirming", percent: null });
         }
         try {
           const response = await (this.opts.fetcher ?? fetch)(

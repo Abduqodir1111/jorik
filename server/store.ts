@@ -2,6 +2,7 @@ import {
   instagramMessageKey,
   reconcileInstagramMessage,
 } from "./instagram-message-key.js";
+import type { ArchiveJob, ArchiveProgress } from "../shared/archive.js";
 import { randomUUID } from "node:crypto";
 import type { IncomingNotification } from "./push.js";
 import type { DB } from "./db.js";
@@ -19,6 +20,11 @@ export class Store {
     public changed: () => void = () => {},
     public notifyIncoming: (event?: IncomingNotification) => void = () => {},
   ) {}
+  archiveJobChanged: (job: ArchiveJob) => void = () => {};
+  reportArchiveProgress: (
+    messageId: string,
+    progress: ArchiveProgress,
+  ) => void = () => {};
   ordersChanged: () => void = () => this.changed();
   messageDeleted: (id: string, conversationId: string) => void = () =>
     this.changed();
@@ -402,6 +408,20 @@ export class Store {
             .run(state, Date.now() + (err.retryAfterMs ?? 0), job.id);
         })();
       }
+      const completed = this.db
+        .prepare("SELECT status FROM messages WHERE id=?")
+        .get(m.id) as { status: string };
+      this.reportArchiveProgress(m.id, {
+        phase:
+          completed.status === "sent"
+            ? "complete"
+            : completed.status === "unknown"
+              ? "unknown"
+              : completed.status === "queued"
+                ? "queued"
+                : "error",
+        percent: completed.status === "sent" ? 100 : null,
+      });
       this.changed();
     } finally {
       this.busy = false;

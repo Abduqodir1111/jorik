@@ -36,11 +36,17 @@ export class ArchiveVideo {
     readonly ffmpeg = process.env.FFMPEG_PATH || "ffmpeg",
     readonly ffprobe = process.env.FFPROBE_PATH || "ffprobe",
     readonly options: {
+      onProgress?: (percent: number | null) => void;
       memory?: () => Promise<MediaMemorySnapshot>;
       memoryWaitMs?: number;
       memoryRetryMs?: number;
     } = {},
   ) {}
+  private progress(percent: number | null) {
+    try {
+      this.options.onProgress?.(percent);
+    } catch {}
+  }
   private cachePath(e: {
     path: string;
     stat: { size: number; mtimeMs: number };
@@ -187,6 +193,7 @@ export class ArchiveVideo {
   }
   private async convert(id: string): Promise<PreparedVideo> {
     if (this.stopped) throw new Error("Подготовка остановлена");
+    this.progress(null);
     const e = await this.index.get(id, "video");
     if (e.stat.size > 1024 * 1024 * 1024)
       throw new Error("Оригинал видео больше 1 ГБ.");
@@ -221,7 +228,9 @@ export class ArchiveVideo {
       };
     };
     try {
-      return await result();
+      const cached = await result();
+      this.progress(100);
+      return cached;
     } catch {}
     await this.waitForMemory(80, 48);
     const meta = await this.probe(e.path);
@@ -269,7 +278,8 @@ export class ArchiveVideo {
           (meta.audio ? 128 : 0) -
           32,
       );
-      await run(
+      this.progress(0);
+      const encoding = run(
         "nice",
         [
           "-n",
@@ -279,6 +289,11 @@ export class ArchiveVideo {
           "-v",
           "error",
           "-y",
+          "-progress",
+          "pipe:1",
+          "-stats_period",
+          "1",
+          "-nostats",
           "-threads",
           "1",
           "-filter_threads",
@@ -337,10 +352,27 @@ export class ArchiveVideo {
         ],
         {
           timeout: 15 * 60000,
-          maxBuffer: 65536,
+          maxBuffer: 2 * 1024 * 1024,
           signal: this.controller.signal,
         },
       );
+      let progressBuffer = "";
+      encoding.child.stdout?.on("data", (chunk: Buffer) => {
+        progressBuffer += chunk.toString();
+        const lines = progressBuffer.split("\n");
+        progressBuffer = lines.pop() || "";
+        for (const line of lines) {
+          const match = /^out_time_us=(\d+)/.exec(line);
+          if (match)
+            this.progress(
+              Math.min(
+                99,
+                Math.floor(Number(match[1]) / (meta.duration * 10000)),
+              ),
+            );
+        }
+      });
+      await encoding;
       const s = await fs.stat(temp);
       if (s.size > 18 * 1024 * 1024 || !s.size)
         throw new Error("Видео не удалось сжать до 18 МБ.");
@@ -352,7 +384,9 @@ export class ArchiveVideo {
         throw new Error("Оригинал изменился во время подготовки.");
       await fs.chmod(temp, 0o600);
       await fs.rename(temp, file);
-      return await result();
+      const prepared = await result();
+      this.progress(100);
+      return prepared;
     } catch (e) {
       if (e instanceof Error && !("stderr" in e)) throw e;
       throw new Error(

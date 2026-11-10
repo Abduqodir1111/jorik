@@ -421,6 +421,8 @@ test("Instagram archive video streams multipart once and submits native video at
   const dir = await temp(),
     db = openDb(dir, "real"),
     store = new Store(db);
+  const reports: any[] = [];
+  store.reportArchiveProgress = (id, p) => reports.push({ id, ...p });
   let uploads = 0,
     sends = 0,
     fail = false;
@@ -447,6 +449,7 @@ test("Instagram archive video streams multipart once and submits native video at
       }
       if (options.method === "POST") {
         sends++;
+        assert.equal(reports.at(-1)?.phase, "confirming");
         assert.deepEqual(JSON.parse(String(options.body)).message, {
           attachment: {
             type: "video",
@@ -506,6 +509,17 @@ test("Instagram archive video streams multipart once and submits native video at
     };
     const first = add();
     await store.tick();
+    assert.ok(
+      reports.some(
+        (p) =>
+          p.id === first &&
+          p.phase === "uploading" &&
+          p.bytesSent === 15 &&
+          p.totalBytes === 15 &&
+          p.percent === 100,
+      ),
+    );
+    assert.equal(reports.at(-1)?.phase, "complete");
     assert.equal(
       store.messages(c.id).find((m) => m.id === first)?.status,
       "sent",

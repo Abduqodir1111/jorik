@@ -110,6 +110,10 @@ export async function createApp(opts: {
       }
     }
   });
+  store.archiveJobChanged = (job) => {
+    const payload = `event: archive-job\ndata: ${JSON.stringify(job)}\n\n`;
+    for (const c of clients) sendEvent(clients, c, payload);
+  };
   store.ordersChanged = () => {
     for (const client of clients)
       sendEvent(clients, client, "event: orders-changed\ndata: changed\n\n");
