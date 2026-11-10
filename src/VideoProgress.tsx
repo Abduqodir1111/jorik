@@ -9,6 +9,7 @@ export default function VideoProgress({ job }: { job: ArchiveJob }) {
     preparing: "Подготовка видео",
     queued: "В очереди отправки",
     uploading: "Загрузка видео",
+    reusing: "Отправляем сохранённое видео",
     confirming: "Ожидаем подтверждения",
     complete: "Отправлено",
     error: "Не удалось отправить",
@@ -86,7 +87,9 @@ export default function VideoProgress({ job }: { job: ArchiveJob }) {
         <div className="video-send-steps">
           <span>{!job.local && <Check size={12} />} В очереди</span>
           <span>
-            {["uploading", "confirming", "complete"].includes(phase) ? (
+            {["uploading", "reusing", "confirming", "complete"].includes(
+              phase,
+            ) ? (
               <Check size={12} />
             ) : null}{" "}
             Подготовка

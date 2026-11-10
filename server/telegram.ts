@@ -1,4 +1,4 @@
-import { uploadArchiveTelegram } from "./archive-telegram-upload.js";
+import { sendTelegramArchive } from "./telegram-archive-media.js";
 import { gunzipSync } from "node:zlib";
 import {
   richMedia,
@@ -1616,7 +1616,7 @@ export class TelegramIntegration {
           : undefined;
         const archive = this.store.db
           .prepare(
-            "SELECT file,size,duration,width,height FROM archive_jobs WHERE message_id=? AND conversation_id=?",
+            "SELECT file,size,duration,width,height,source_key,entry_id FROM archive_jobs WHERE message_id=? AND conversation_id=?",
           )
           .get(m.id, m.conversationId) as
           | {
@@ -1625,86 +1625,23 @@ export class TelegramIntegration {
               duration: number;
               width: number;
               height: number;
+              source_key: string | null;
+              entry_id: string;
             }
           | undefined;
         if (archive) {
-          let uploaded: Api.InputFile | Api.InputFileBig;
-          try {
-            this.store.reportArchiveProgress(m.id, {
-              phase: "uploading",
-              percent: 0,
-              bytesSent: 0,
-              totalBytes: archive.size,
-            });
-            uploaded = await uploadArchiveTelegram(
-              this.client!,
-              archive.file,
-              archive.size,
-              (bytes, total) =>
-                this.store.reportArchiveProgress(m.id, {
-                  phase: "uploading",
-                  percent: Math.floor((bytes / total) * 100),
-                  bytesSent: bytes,
-                  totalBytes: total,
-                }),
-            );
-            this.store.reportArchiveProgress(m.id, {
-              phase: "confirming",
-              percent: null,
-            });
-          } catch {
-            throw new SendFailure(
-              "Не удалось загрузить видео в Telegram. Сообщение не отправлено.",
-            );
-          }
-          try {
-            const result = await this.client!.invoke(
-              new Api.messages.SendMedia({
-                peer: this.peer(conv.externalId),
-                randomId: bigInt(random),
-                message: "",
-                media: new Api.InputMediaUploadedDocument({
-                  file: uploaded,
-                  mimeType: "video/mp4",
-                  attributes: [
-                    new Api.DocumentAttributeFilename({
-                      fileName: "review.mp4",
-                    }),
-                    new Api.DocumentAttributeVideo({
-                      duration: archive.duration,
-                      w: archive.width,
-                      h: archive.height,
-                      supportsStreaming: true,
-                    }),
-                  ],
-                }),
-              }),
-            );
-            if (result instanceof Api.UpdateShortSentMessage)
-              return { externalId: String(result.id) };
-            if (
-              result instanceof Api.Updates ||
-              result instanceof Api.UpdatesCombined
-            ) {
-              for (const u of result.updates)
-                if (
-                  u instanceof Api.UpdateMessageID &&
-                  u.randomId?.toString() === random
-                )
-                  return { externalId: String(u.id) };
-            }
-            const confirmed = this.store.db
-              .prepare("SELECT external_id FROM messages WHERE id=?")
-              .get(m.id) as { external_id: string | null };
-            if (confirmed.external_id)
-              return { externalId: confirmed.external_id };
-            throw new Error("No confirmation");
-          } catch {
-            throw new SendFailure(
-              "Нет подтверждения отправки видео. Проверьте Telegram перед повтором.",
-              true,
-            );
-          }
+          return await sendTelegramArchive({
+            db: this.store.db,
+            client: this.client!,
+            account: this.accountId,
+            peerId: conv.externalId,
+            peer: (id) => this.peer(id),
+            random,
+            messageId: m.id,
+            archive,
+            prepare: this.store.prepareArchiveVideo,
+            progress: (p) => this.store.reportArchiveProgress(m.id, p),
+          });
         }
         if (m.attachments.length) {
           const id = m.attachments[0].url.split("/").at(-1);

@@ -20,6 +20,10 @@ export class Store {
     public changed: () => void = () => {},
     public notifyIncoming: (event?: IncomingNotification) => void = () => {},
   ) {}
+  prepareArchiveVideo?: (
+    entryId: string,
+    expectedKey?: string | null,
+  ) => Promise<import("./archive-video.js").PreparedVideo>;
   archiveJobChanged: (job: ArchiveJob) => void = () => {};
   reportArchiveProgress: (
     messageId: string,

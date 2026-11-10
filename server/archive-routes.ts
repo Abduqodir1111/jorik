@@ -1,6 +1,8 @@
+import { cachedTelegramArchiveMedia } from "./telegram-archive-media.js";
 import { archiveProgress } from "./archive-progress.js";
 import { ArchivePdfMetadata } from "./archive-pdf.js";
 import os from "node:os";
+import fs from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { mediaGate } from "./media-gate.js";
 import type { FastifyInstance } from "fastify";
@@ -26,19 +28,27 @@ export function registerArchive(
 ) {
   const index = new ArchiveIndex(opts?.roots || []);
   const progress = archiveProgress(store);
-  let progressJob: string | undefined;
+  let progressJob: string | undefined, progressEntry: string | undefined;
   const video = new ArchiveVideo(
     index,
     path.join(dataDir, "archive-cache"),
     undefined,
     undefined,
     {
-      onProgress: (percent) => {
-        if (progressJob && !stopped)
+      onProgress: (percent, entryId) => {
+        if (progressJob && entryId === progressEntry && !stopped)
           progress.update(progressJob, { phase: "preparing", percent });
       },
     },
   );
+  store.prepareArchiveVideo = async (id, expectedKey) => {
+    if (expectedKey && (await video.identity(id)).key !== expectedKey)
+      throw new Error("Видео в архиве изменилось. Повторите отправку.");
+    const v = await video.prepare(id, true);
+    if (expectedKey && (await video.identity(id)).key !== expectedKey)
+      throw new Error("Видео в архиве изменилось. Повторите отправку.");
+    return v;
+  };
   const pdfMetadata = new ArchivePdfMetadata(
     path.join(dataDir, "archive-pdf-metadata.json"),
   );
@@ -67,15 +77,42 @@ export function registerArchive(
       if (!row) return;
       try {
         progressJob = row.id;
+        progressEntry = row.entry_id;
         progress.update(row.id, { phase: "preparing", percent: null }, true);
-        const v = await video.prepare(row.entry_id, true);
+        const identity = await video.identity(row.entry_id);
+        const account = store.conversation(row.conversation_id).accountId;
+        const reused = cachedTelegramArchiveMedia(
+          store.db,
+          account,
+          identity.key,
+        );
+        // Metadata lookup only: no ffprobe/ffmpeg when Telegram already has it.
+        const v = reused
+          ? {
+              file: identity.file,
+              size: reused.size,
+              duration: reused.duration,
+              width: reused.width,
+              height: reused.height,
+            }
+          : await video.prepare(row.entry_id, true);
+        if ((await video.identity(row.entry_id)).key !== identity.key)
+          throw new Error("Видео в архиве изменилось. Повторите отправку.");
         if (stopped) return;
         store.db.transaction(() => {
           store.db
             .prepare(
-              "UPDATE archive_jobs SET file=?,size=?,duration=?,width=?,height=? WHERE id=?",
+              "UPDATE archive_jobs SET file=?,size=?,duration=?,width=?,height=?,source_key=? WHERE id=?",
             )
-            .run(v.file, v.size, v.duration, v.width, v.height, row.id);
+            .run(
+              v.file,
+              v.size,
+              v.duration,
+              v.width,
+              v.height,
+              identity.key,
+              row.id,
+            );
           const messageId = store.enqueue(
             row.conversation_id,
             "",
@@ -106,6 +143,7 @@ export function registerArchive(
           progress.update(row.id, { phase: "error", percent: null }, true);
       } finally {
         progressJob = undefined;
+        progressEntry = undefined;
       }
     })().finally(() => {
       activeJob = undefined;
@@ -344,7 +382,7 @@ export function registerArchive(
     async (req, reply) => {
       const row = store.db
         .prepare(
-          "SELECT file,size FROM archive_jobs WHERE id=? AND file IS NOT NULL",
+          "SELECT j.file,j.size,j.message_id,m.status,c.account_id FROM archive_jobs j LEFT JOIN messages m ON m.id=j.message_id JOIN conversations c ON c.id=j.conversation_id WHERE j.id=? AND j.file IS NOT NULL",
         )
         .get(req.params.id) as any;
       if (
@@ -354,6 +392,20 @@ export function registerArchive(
           .startsWith(path.resolve(dataDir, "archive-cache") + path.sep)
       )
         return reply.code(404).send({ error: "Видео не найдено" });
+      try {
+        await fs.stat(row.file);
+      } catch (e) {
+        if (
+          (e as NodeJS.ErrnoException).code === "ENOENT" &&
+          row.status === "sent" &&
+          row.account_id.startsWith("telegram-") &&
+          row.message_id
+        )
+          return reply.redirect(
+            "/api/telegram/videos/" + encodeURIComponent(row.message_id),
+          );
+        throw e;
+      }
       // Fastify static's file sender supports Range without reading the whole video into RAM.
       return reply.sendFile(
         path.basename(row.file),

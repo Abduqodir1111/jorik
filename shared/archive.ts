@@ -45,6 +45,7 @@ export type ArchivePhase =
   | "preparing"
   | "queued"
   | "uploading"
+  | "reusing"
   | "confirming"
   | "complete"
   | "error"

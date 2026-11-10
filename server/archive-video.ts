@@ -27,6 +27,7 @@ export class ArchiveVideo {
   }[] = [];
   private pending = new Map<string, Promise<PreparedVideo>>();
   private active = false;
+  private progressEntry?: string;
   private stopped = false;
   private running?: Promise<void>;
   private controller = new AbortController();
@@ -36,7 +37,7 @@ export class ArchiveVideo {
     readonly ffmpeg = process.env.FFMPEG_PATH || "ffmpeg",
     readonly ffprobe = process.env.FFPROBE_PATH || "ffprobe",
     readonly options: {
-      onProgress?: (percent: number | null) => void;
+      onProgress?: (percent: number | null, entryId?: string) => void;
       memory?: () => Promise<MediaMemorySnapshot>;
       memoryWaitMs?: number;
       memoryRetryMs?: number;
@@ -44,7 +45,7 @@ export class ArchiveVideo {
   ) {}
   private progress(percent: number | null) {
     try {
-      this.options.onProgress?.(percent);
+      this.options.onProgress?.(percent, this.progressEntry);
     } catch {}
   }
   private cachePath(e: {
@@ -55,6 +56,11 @@ export class ArchiveVideo {
       .update(`${e.path}:${e.stat.size}:${e.stat.mtimeMs}:h264-v2-sdr709-crf24`)
       .digest("hex");
     return path.join(this.cacheDir, key + ".chat.mp4");
+  }
+  async identity(id: string) {
+    const e = await this.index.get(id, "video");
+    const file = this.cachePath(e);
+    return { key: path.basename(file, ".chat.mp4"), file };
   }
   // Preview may reuse a finished copy, but must never probe, encode or queue work.
   async cachedFile(id: string) {
@@ -126,9 +132,12 @@ export class ArchiveVideo {
       while (this.queue.length && !this.stopped) {
         const j = this.queue.shift()!;
         try {
+          this.progressEntry = j.id;
           j.resolve(await mediaGate(() => this.convert(j.id)));
         } catch (e) {
           j.reject(e);
+        } finally {
+          this.progressEntry = undefined;
         }
       }
     } finally {
