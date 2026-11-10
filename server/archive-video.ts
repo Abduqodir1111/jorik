@@ -1,3 +1,9 @@
+import { setTimeout as delay } from "node:timers/promises";
+import {
+  readMediaMemory,
+  mediaMemoryReady,
+  type MediaMemorySnapshot,
+} from "./media-memory.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -29,13 +35,18 @@ export class ArchiveVideo {
     readonly cacheDir: string,
     readonly ffmpeg = process.env.FFMPEG_PATH || "ffmpeg",
     readonly ffprobe = process.env.FFPROBE_PATH || "ffprobe",
+    readonly options: {
+      memory?: () => Promise<MediaMemorySnapshot>;
+      memoryWaitMs?: number;
+      memoryRetryMs?: number;
+    } = {},
   ) {}
   private cachePath(e: {
     path: string;
     stat: { size: number; mtimeMs: number };
   }) {
     const key = createHash("sha256")
-      .update(`${e.path}:${e.stat.size}:${e.stat.mtimeMs}:h264-v1`)
+      .update(`${e.path}:${e.stat.size}:${e.stat.mtimeMs}:h264-v2-sdr709-crf24`)
       .digest("hex");
     return path.join(this.cacheDir, key + ".chat.mp4");
   }
@@ -77,14 +88,30 @@ export class ArchiveVideo {
     if (!this.active) this.running = this.drain();
     return task;
   }
-  private async hostHasHeadroom() {
-    if (process.platform !== "linux") return true;
-    try {
-      const info = await fs.readFile("/proc/meminfo", "utf8");
-      const available = Number(info.match(/^MemAvailable:\s+(\d+)/m)?.[1]);
-      return !available || available >= 180 * 1024;
-    } catch {
-      return false;
+  private async waitForMemory(hostMiB: number, groupMiB: number) {
+    const deadline = Date.now() + (this.options.memoryWaitMs ?? 30000);
+    while (true) {
+      const snapshot = await (this.options.memory || readMediaMemory)();
+      if (
+        mediaMemoryReady(
+          snapshot,
+          hostMiB * 1024 * 1024,
+          groupMiB * 1024 * 1024,
+        )
+      )
+        return;
+      if (Date.now() >= deadline)
+        throw new Error(
+          "Сервер занят: пока недостаточно памяти для подготовки видео. Повторите позже.",
+        );
+      await delay(
+        Math.min(
+          this.options.memoryRetryMs ?? 2000,
+          Math.max(1, deadline - Date.now()),
+        ),
+        undefined,
+        { signal: this.controller.signal },
+      );
     }
   }
   private async drain() {
@@ -103,19 +130,28 @@ export class ArchiveVideo {
     }
   }
   private async probe(file: string) {
-    const { stdout } = await run(
-      this.ffprobe,
-      [
-        "-v",
-        "error",
-        "-show_entries",
-        "format=duration:stream=codec_type,codec_name,pix_fmt,width,height,color_transfer",
-        "-of",
-        "json",
-        file,
-      ],
-      { timeout: 15000, maxBuffer: 65536, signal: this.controller.signal },
-    );
+    let stdout: string;
+    try {
+      ({ stdout } = await run(
+        this.ffprobe,
+        [
+          "-v",
+          "error",
+          "-threads",
+          "1",
+          "-show_entries",
+          "format=duration:stream=codec_type,codec_name,pix_fmt,width,height,color_transfer,color_space,color_primaries,color_range,avg_frame_rate,sample_aspect_ratio,channels:stream_side_data=rotation",
+          "-of",
+          "json",
+          file,
+        ],
+        { timeout: 60000, maxBuffer: 65536, signal: this.controller.signal },
+      ));
+    } catch {
+      throw new Error(
+        "Не удалось прочитать видео. Возможно, диск NAS занят. Повторите подготовку позже.",
+      );
+    }
     const p = JSON.parse(stdout),
       v = p.streams?.find((s: any) => s.codec_type === "video"),
       duration = Number(p.format?.duration);
@@ -138,26 +174,43 @@ export class ArchiveVideo {
       codec: v.codec_name,
       pix: v.pix_fmt,
       transfer: v.color_transfer,
+      primaries: v.color_primaries,
+      space: v.color_space,
+      range: v.color_range,
+      rotation: Number(
+        v.side_data_list?.find((s: any) => s.rotation !== undefined)
+          ?.rotation || 0,
+      ),
+      sar: v.sample_aspect_ratio,
+      audio: p.streams?.find((s: any) => s.codec_type === "audio"),
     };
   }
   private async convert(id: string): Promise<PreparedVideo> {
     if (this.stopped) throw new Error("Подготовка остановлена");
-    if (!(await this.hostHasHeadroom()))
-      throw new Error(
-        "Сервер занят: недостаточно свободной памяти для видео. Повторите позже.",
-      );
     const e = await this.index.get(id, "video");
     if (e.stat.size > 1024 * 1024 * 1024)
       throw new Error("Оригинал видео больше 1 ГБ.");
-    const meta = await this.probe(e.path);
     await fs.mkdir(this.cacheDir, { recursive: true, mode: 0o700 });
     const file = this.cachePath(e);
     const result = async () => {
-      const s = await fs.stat(file);
+      const s = await fs.lstat(file);
+      if (
+        s.isSymbolicLink() ||
+        !s.isFile() ||
+        (await fs.realpath(file)) !==
+          path.join(await fs.realpath(this.cacheDir), path.basename(file))
+      )
+        throw new Error("Некорректный кэш видео");
       if (!s.size || s.size > 18 * 1024 * 1024)
         throw new Error("Подготовленное видео превышает 18 МБ.");
       const p = await this.probe(file);
-      if (p.codec !== "h264" || p.pix !== "yuv420p")
+      if (
+        p.codec !== "h264" ||
+        p.pix !== "yuv420p" ||
+        p.transfer !== "bt709" ||
+        p.primaries !== "bt709" ||
+        p.space !== "bt709"
+      )
         throw new Error("Видео несовместимо");
       return {
         file,
@@ -170,7 +223,22 @@ export class ArchiveVideo {
     try {
       return await result();
     } catch {}
-    // Always normalize MOV, HEVC, HDR and oversized MP4. Originals stay read-only.
+    await this.waitForMemory(80, 48);
+    const meta = await this.probe(e.path);
+    const canRemux =
+      meta.codec === "h264" &&
+      meta.pix === "yuv420p" &&
+      meta.transfer === "bt709" &&
+      meta.primaries === "bt709" &&
+      meta.space === "bt709" &&
+      meta.range === "tv" &&
+      meta.rotation === 0 &&
+      (!meta.sar || meta.sar === "1:1") &&
+      (!meta.audio ||
+        (meta.audio.codec_name === "aac" && meta.audio.channels <= 2)) &&
+      e.stat.size <= 17 * 1024 * 1024;
+    // A compatible small clip only needs lossless MP4 packaging. Decode/encode the rest.
+
     const temp = file + "." + randomUUID() + ".tmp.mp4";
     try {
       let cacheBytes = 0;
@@ -182,45 +250,24 @@ export class ArchiveVideo {
         throw new Error(
           "Кэш видео достиг 2 ГБ. Требуется очистка старых копий.",
         );
-      // Don't start another heavy process while the small NAS is under memory pressure.
-      // The cgroup includes ffmpeg and Node; leave room for decoder frames and muxing.
-      const readNumber = async (file: string) =>
-        Number(await fs.readFile(file, "utf8"));
-      try {
-        let used: number, max: number;
-        try {
-          [used, max] = await Promise.all([
-            readNumber("/sys/fs/cgroup/memory.current"),
-            readNumber("/sys/fs/cgroup/memory.max"),
-          ]);
-        } catch (e) {
-          if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-          [used, max] = await Promise.all([
-            readNumber("/sys/fs/cgroup/memory/memory.usage_in_bytes"),
-            readNumber("/sys/fs/cgroup/memory/memory.limit_in_bytes"),
-          ]);
-        }
-
-        if (Number.isFinite(max) && max - used < 160 * 1024 * 1024)
-          throw new Error(
-            "Недостаточно свободной памяти для видео. Повторите позже.",
-          );
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-      }
+      await this.waitForMemory(canRemux ? 96 : 180, canRemux ? 64 : 160);
       const disk = await fs.statfs(this.cacheDir);
       if (disk.bavail * disk.bsize < 256 * 1024 * 1024)
         throw new Error("Недостаточно места для подготовки видео.");
       const scale =
-        "scale='if(gt(iw,ih),min(720,iw),-2)':'if(gt(iw,ih),-2,min(720,ih))',setsar=1";
+        "scale='if(gt(iw,ih),trunc(min(720,iw)/2)*2,-2)':'if(gt(iw,ih),-2,trunc(min(720,ih)/2)*2)':flags=lanczos";
       const hdr = ["smpte2084", "arib-std-b67"].includes(meta.transfer);
+      const sdrTags =
+        "setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709";
       const filter = hdr
-        ? `${scale},zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p`
-        : scale;
+        ? `${scale},zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=2,zscale=t=bt709:m=bt709:r=tv,format=yuv420p,setsar=1,${sdrTags}`
+        : `${scale}:out_color_matrix=bt709:out_range=tv,setsar=1,${sdrTags}`;
       // Rate budget includes audio and mux overhead, verified again after conversion.
       const rate = Math.min(
-        1200,
-        Math.floor((17 * 1024 * 1024 * 8) / meta.duration / 1000) - 112,
+        1800,
+        Math.floor((17 * 1024 * 1024 * 8) / meta.duration / 1000) -
+          (meta.audio ? 128 : 0) -
+          32,
       );
       await run(
         "nice",
@@ -250,30 +297,42 @@ export class ArchiveVideo {
           "-1",
           "-t",
           "180",
-          "-vf",
-          filter,
-          "-c:v",
-          "libx264",
-          "-threads",
-          "1",
-          "-preset",
-          "ultrafast",
-          "-crf",
-          "28",
-          "-maxrate",
-          `${rate}k`,
-          "-bufsize",
-          `${rate * 2}k`,
-          "-pix_fmt",
-          "yuv420p",
+          ...(canRemux
+            ? ["-c:v", "copy", "-c:a", "copy"]
+            : [
+                "-vf",
+                filter,
+                "-c:v",
+                "libx264",
+                "-threads",
+                "1",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "24",
+                "-maxrate",
+                `${rate}k`,
+                "-bufsize",
+                `${rate * 2}k`,
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-ac",
+                "2",
+              ]),
+          "-color_primaries",
+          "bt709",
+          "-color_trc",
+          "bt709",
+          "-colorspace",
+          "bt709",
+          "-color_range",
+          "tv",
           "-movflags",
           "+faststart",
-          "-c:a",
-          "aac",
-          "-b:a",
-          "96k",
-          "-ac",
-          "2",
           temp,
         ],
         {

@@ -242,7 +242,7 @@ test("Video preview reuses only the current finished cache; download always retu
   try {
     const e = await f.archive.index.get(f.videoId, "video");
     const hash = createHash("sha256")
-      .update(`${e.path}:${e.stat.size}:${e.stat.mtimeMs}:h264-v1`)
+      .update(`${e.path}:${e.stat.size}:${e.stat.mtimeMs}:h264-v2-sdr709-crf24`)
       .digest("hex");
     const cache = path.join(f.dir, "archive-cache");
     await fs.mkdir(cache);
