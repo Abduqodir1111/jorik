@@ -10,6 +10,7 @@
 .rail-button { width:44px; height:44px; border-radius:12px; }
 .sidebar > .rail-button[aria-label="Входящие"] { order:1; }
 .sidebar > .rail-button[aria-label="Заказы"] { order:2; }
+.sidebar > .rail-button.archive-nav { order:3; }
 .rail-bottom { order:4; }
 .app .topbar { height:44px; min-height:44px; padding:0 24px; background:var(--surface); border-bottom:1px solid var(--line); font-size:12px; }
 .app.inbox-page .topbar { display:none; }

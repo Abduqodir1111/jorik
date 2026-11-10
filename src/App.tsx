@@ -963,6 +963,7 @@ export default function App() {
             "rail-button archive-nav " + (page === "archive" ? "active" : "")
           }
           aria-label="Поиск по архиву"
+          title="Поиск по архиву"
           aria-current={page === "archive" ? "page" : undefined}
           onClick={() => setPage("archive")}
         >
@@ -1656,10 +1657,10 @@ export default function App() {
             onPanelChange={setOrderPanelOpen}
           />
         </Suspense>
-        {(page === "archive" || page === "inbox") && (
-          <Suspense fallback={null}>
+        {page === "archive" && (
+          <Suspense fallback={<p className="page-content">Открываем поиск…</p>}>
             <ArchiveSearch
-              fullPage={page === "archive"}
+              fullPage
               conversationId={c?.id}
               chatName={
                 c ? `${c.username || c.name} · ${a?.name || ""}` : undefined

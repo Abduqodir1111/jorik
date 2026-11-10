@@ -168,6 +168,7 @@
   padding: 0 14px 6px;
 }
 .archive-page {
+  animation: archive-page-enter 220ms ease-out both;
   margin: 20px;
   max-width: 760px;
   flex: 1;
@@ -175,13 +176,15 @@
   flex-direction: column;
   min-height: 0;
 }
-.sidebar .archive-nav {
-  order: 3;
+.archive-page .archive-results {
+  flex: 1;
 }
-@media (min-width: 768px) {
-  .archive-nav {
-    display: none !important;
-  }
+@keyframes archive-page-enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .archive-page { animation: none; }
 }
 @media (max-width: 767px) {
   .archive-widget {
