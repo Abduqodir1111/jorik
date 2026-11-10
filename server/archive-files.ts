@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import type { ArchivePdfMetadata } from "./archive-pdf.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -166,6 +168,7 @@ export function registerArchiveFiles(
   app: FastifyInstance,
   index: ArchiveIndex,
   video: ArchiveVideo,
+  pdfMetadata: ArchivePdfMetadata,
 ) {
   const files = new ArchiveFiles(index);
   let listings = 0,
@@ -200,6 +203,29 @@ export function registerArchiveFiles(
       return await files.list(q.id, q.file, q.offset, q.limit);
     } finally {
       listings--;
+    }
+  });
+  app.get("/api/archive/pdf-info", async (req, reply) => {
+    const q = query.parse(req.query);
+    const original = await files.resolve(q.id, q.file);
+    if (!original.stat.isFile() || !/\.pdf$/i.test(original.file))
+      throw fail("Это не PDF", 415);
+    const key = createHash("sha256")
+      .update(
+        JSON.stringify([
+          q.id,
+          q.file,
+          original.stat.size,
+          original.stat.mtimeMs,
+        ]),
+      )
+      .digest("hex");
+    try {
+      return { pages: await pdfMetadata.get(original.file, key) };
+    } catch (error) {
+      if ((error as { statusCode?: number }).statusCode === 503)
+        reply.header("Retry-After", "2");
+      throw error;
     }
   });
   app.get("/api/archive/thumb", { compress: false }, async (req, reply) => {

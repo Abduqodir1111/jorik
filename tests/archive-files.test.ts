@@ -284,6 +284,28 @@ test("PDF preview is authenticated, same-origin and streamed with Range while do
   const pdf = Buffer.from("%PDF-1.7\n" + "sample document\n".repeat(100));
   try {
     await fs.writeFile(path.join(f.child, "preview.pdf"), pdf);
+    let pageReads = 0;
+    f.archive.pdfMetadata.read = async () => {
+      pageReads++;
+      return 42;
+    };
+    for (let n = 0; n < 2; n++) {
+      const metadata = await f.app.inject(address("pdf-info", f.id, file));
+      assert.equal(metadata.statusCode, 200);
+      assert.deepEqual(metadata.json(), { pages: 42 });
+      assert.equal(metadata.headers["cache-control"], "no-store");
+    }
+    assert.equal(pageReads, 1);
+    assert.equal(
+      (await f.app.inject(address("pdf-info", f.id, "../outside.pdf")))
+        .statusCode,
+      404,
+    );
+    assert.equal(
+      (await f.app.inject(address("pdf-info", f.id, "photo.jpg"))).statusCode,
+      415,
+    );
+
     const normal = await f.app.inject(address("file", f.id, file));
     assert.match(String(normal.headers["content-disposition"]), /^attachment/);
     assert.equal(normal.headers["x-frame-options"], "DENY");
@@ -355,6 +377,11 @@ test("PDF preview is authenticated, same-origin and streamed with Range while do
           address("file", secure.id, file, { preview: "1" }),
         )
       ).statusCode,
+      401,
+    );
+    assert.equal(
+      (await secure.app.inject(address("pdf-info", secure.id, file)))
+        .statusCode,
       401,
     );
   } finally {

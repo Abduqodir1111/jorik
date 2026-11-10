@@ -110,6 +110,7 @@ export function registerOrders(app: FastifyInstance, store: Store) {
         startDate: date,
         endDate: date,
         source: z.enum(["ALL", "STOREBOOKS", "MANGASTORE"]).default("ALL"),
+        scope: z.enum(["courier", "all"]).default("courier"),
       })
       .strict()
       .refine((f) => f.startDate <= f.endDate, "Начало периода позже окончания")
@@ -122,7 +123,10 @@ export function registerOrders(app: FastifyInstance, store: Store) {
     if (source) params.push(filter.source);
     const rows = db
       .prepare(
-        "SELECT * FROM orders WHERE date>=? AND date<=? AND refused=0 AND json_extract(data,'$.deliveryType') IN ('delivery','mail')" +
+        "SELECT * FROM orders WHERE date>=? AND date<=?" +
+          (filter.scope === "courier"
+            ? " AND refused=0 AND json_extract(data,'$.deliveryType') IN ('delivery','mail')"
+            : "") +
           source +
           " ORDER BY date DESC,created_at DESC LIMIT 10001",
       )

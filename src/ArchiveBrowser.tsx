@@ -1,3 +1,4 @@
+import { useArchivePdfPages, pdfPagesLabel } from "./useArchivePdfPages";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -60,6 +61,12 @@ export default function ArchiveBrowser({
           sizeBytes: 0,
         }
       : null,
+  );
+  const { pages: pdfPages, retry: retryPages } = useArchivePdfPages(
+    entry.id,
+    contents,
+    !media,
+    dialog,
   );
   const [mediaError, setMediaError] = useState(false);
   const [pdfState, setPdfState] = useState<"loading" | "ready" | "error">(
@@ -390,12 +397,36 @@ export default function ArchiveBrowser({
                     {contents.items
                       .filter((e) => e.type !== "image" && e.type !== "folder")
                       .map((e) => (
-                        <article key={e.relativePath}>
+                        <article
+                          key={e.relativePath}
+                          data-pdf-file={
+                            e.ext === ".pdf" ? e.relativePath : undefined
+                          }
+                        >
                           <div>
                             <b>{e.name}</b>
                             <small>
                               {size(e.sizeBytes)} · {e.ext || "файл"}
+                              {e.ext === ".pdf" &&
+                                (pdfPages[e.relativePath]?.pages
+                                  ? " · " +
+                                    pdfPagesLabel(
+                                      pdfPages[e.relativePath].pages!,
+                                    )
+                                  : pdfPages[e.relativePath]
+                                    ? " · Число страниц недоступно"
+                                    : " · Страниц: …")}
                             </small>
+                            {e.ext === ".pdf" &&
+                              pdfPages[e.relativePath]?.error && (
+                                <button
+                                  className="archive-pdf-count-retry"
+                                  title={pdfPages[e.relativePath].error}
+                                  onClick={() => retryPages(e.relativePath)}
+                                >
+                                  Повторить подсчёт страниц
+                                </button>
+                              )}
                           </div>
                           <div className="archive-browser-toolbar">
                             {(e.type === "video" || e.ext === ".pdf") && (

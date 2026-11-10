@@ -1,3 +1,4 @@
+import { ArchivePdfMetadata } from "./archive-pdf.js";
 import os from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { mediaGate } from "./media-gate.js";
@@ -25,7 +26,10 @@ export function registerArchive(
 ) {
   const index = new ArchiveIndex(opts?.roots || []);
   const video = new ArchiveVideo(index, path.join(dataDir, "archive-cache"));
-  registerArchiveFiles(app, index, video);
+  const pdfMetadata = new ArchivePdfMetadata(
+    path.join(dataDir, "archive-pdf-metadata.json"),
+  );
+  registerArchiveFiles(app, index, video, pdfMetadata);
   const sharing = new SynologySharing(
     store.db,
     opts?.synology || { url: "", username: "", password: "" },
@@ -356,5 +360,5 @@ export function registerArchive(
     await activeJob;
     await scan;
   });
-  return { index, video, tick, rebuild };
+  return { index, video, pdfMetadata, tick, rebuild };
 }

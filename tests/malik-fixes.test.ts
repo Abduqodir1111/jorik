@@ -70,7 +70,7 @@ test("Additional phone is optional, validated, persists across restart, removabl
     assert.equal(order.additionalPhone, "+998991234567");
     const sheet = generateDeliveryWorksheet([order]);
     assert.equal(sheet.headers.length, 8);
-    assert.equal(sheet.rows[0][2], "+998901234567, +998991234567");
+    assert.equal(sheet.rows[0][2], "901234567, 991234567");
     const changed = await ctx.app.inject({
       method: "PUT",
       url: "/api/orders/" + extra.id,
@@ -80,7 +80,7 @@ test("Additional phone is optional, validated, persists across restart, removabl
     assert.equal(changed.json().additionalPhone, undefined);
     assert.equal(
       generateDeliveryWorksheet([changed.json()]).rows[0][2],
-      input.phone,
+      input.phone.slice(4),
     );
   } finally {
     await ctx.app.close();

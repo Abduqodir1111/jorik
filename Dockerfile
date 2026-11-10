@@ -12,7 +12,7 @@ COPY public ./public
 RUN npm run build && npm prune --omit=dev --no-audit --no-fund
 
 FROM node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
-RUN apt-get update && apt-get install -y --no-install-recommends gosu ca-certificates ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends gosu ca-certificates ffmpeg poppler-utils && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production APP_MODE=real HOST=0.0.0.0 PORT=3001 DATA_DIR=/app/data LOCAL_TEST_NO_PASSWORD=false LOCAL_TEST_NO_RATE_LIMIT=false
 COPY --from=build --chown=node:node /app/node_modules ./node_modules

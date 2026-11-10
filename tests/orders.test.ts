@@ -170,7 +170,7 @@ test("Courier XLSX: exact columns, shop instead of buyer, paid amount, exclusion
   assert.equal(sheet.getCell("D2").value, 150000);
   assert.equal(sheet.getCell("D3").value, "Оплачено");
   assert.equal(sheet.getCell("B3").type, ExcelJS.ValueType.String);
-  assert.equal(sheet.getCell("C2").value, base.phone);
+  assert.equal(sheet.getCell("C2").value, base.phone.slice(4));
   assert.equal(sheet.getCell("H2").value, "");
 });
 

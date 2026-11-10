@@ -1,3 +1,4 @@
+import { generateOrderReport } from "../shared/order-report";
 import DayAccordion from "./DayAccordion";
 import PreviewModal from "./PreviewModal";
 import AdvancedExportModal from "./AdvancedExportModal";
@@ -417,7 +418,7 @@ export default function Orders({
         <AdvancedExportModal
           onClose={() => setAdvanced(false)}
           onResult={async (data, filter) => {
-            const sheet = generateDeliveryWorksheet(data, filter);
+            const sheet = generateOrderReport(data, filter);
             if (sheet.rows.length) await downloadDelivery(sheet, filter);
             setAdvanced(false);
             setPreview({ sheet, filter });

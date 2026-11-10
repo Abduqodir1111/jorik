@@ -41,11 +41,12 @@ export default function AdvancedExportModal({
     controller.current = c;
     try {
       const r = await fetch(
-        "/api/orders/export?" + new URLSearchParams(filter),
+        "/api/orders/export?" +
+          new URLSearchParams({ ...filter, scope: "all" }),
         { signal: c.signal },
       );
       const data = await r.json();
-      if (!r.ok) throw new Error(data.error || "Не удалось получить доставки");
+      if (!r.ok) throw new Error(data.error || "Не удалось получить заказы");
       if (!c.signal.aborted) await onResult(data, filter);
     } catch (e) {
       if (!c.signal.aborted)
@@ -68,6 +69,11 @@ export default function AdvancedExportModal({
           <X />
         </button>
       </header>
+      <p className="export-description">
+        Все заказы по дате заказа: доставка, самовывоз и почта. Один Excel с
+        листами «Заказы» и «Итоги». Отменённые видны в отчёте, но не увеличивают
+        итоговую сумму.
+      </p>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -100,6 +106,7 @@ export default function AdvancedExportModal({
         <label>
           Магазин
           <select
+            aria-label="Магазин"
             value={filter.source}
             disabled={busy}
             onChange={(e) =>

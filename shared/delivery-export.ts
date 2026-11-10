@@ -20,6 +20,12 @@ export type DeliveryWorksheet = {
   rows: (string | number)[][];
   widths: number[];
 };
+export function reportPhone(value = "") {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("998")) return digits.slice(3);
+  if (digits.length === 9) return digits;
+  return value.trim();
+}
 /** One column mapping for XLSX, preview and TSV; strings remain literal cells. */
 export function generateDeliveryWorksheet(
   orders: Order[],
@@ -41,7 +47,9 @@ export function generateDeliveryWorksheet(
     rows: selected.map((o) => [
       o.source,
       o.items,
-      [o.phone, o.additionalPhone].filter(Boolean).join(", "),
+      [reportPhone(o.phone), reportPhone(o.additionalPhone)]
+        .filter(Boolean)
+        .join(", "),
       o.isPaid ? "Оплачено" : o.amount,
       o.district,
       o.address,

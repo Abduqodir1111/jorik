@@ -1,3 +1,4 @@
+import { isOrderReport } from "../shared/order-report";
 import { useEffect, useRef, useState } from "react";
 import { Copy, Download, X } from "lucide-react";
 import {
@@ -53,7 +54,11 @@ export default function PreviewModal({
     >
       <header>
         <div>
-          <h2 id="delivery-preview-title">Предпросмотр доставок</h2>
+          <h2 id="delivery-preview-title">
+            {isOrderReport(sheet)
+              ? "Предпросмотр заказов"
+              : "Предпросмотр доставок"}
+          </h2>
           <small>
             {filter.startDate} — {filter.endDate} · {sheet.rows.length} заказов
           </small>
@@ -78,6 +83,24 @@ export default function PreviewModal({
           </button>
         </div>
       </header>
+      {isOrderReport(sheet) && (
+        <div className="order-report-summary">
+          {sheet.summary.rows.slice(-1).map((row) => (
+            <p key="total">
+              Действующих заказов: <b>{row[3]}</b> · Отменено: <b>{row[4]}</b>
+              <br />
+              Сумма действующих:{" "}
+              <b>{Number(row[5]).toLocaleString("ru-RU")} сум</b> · Отмечено
+              оплаченными: <b>{Number(row[6]).toLocaleString("ru-RU")} сум</b> ·
+              К оплате: <b>{Number(row[7]).toLocaleString("ru-RU")} сум</b>
+            </p>
+          ))}
+          <small>
+            Отменённые заказы не включены в суммы. Подробная разбивка по
+            магазинам и типам получения — на листе «Итоги» в Excel.
+          </small>
+        </div>
+      )}
       <p role="status">{status}</p>
       <div className="delivery-preview-scroll">
         <table>
@@ -118,7 +141,7 @@ export default function PreviewModal({
             </button>
           </nav>
         )}
-        {!sheet.rows.length && <p>Нет доставок за выбранный период.</p>}
+        {!sheet.rows.length && <p>Нет заказов за выбранный период.</p>}
       </div>
     </dialog>
   );
