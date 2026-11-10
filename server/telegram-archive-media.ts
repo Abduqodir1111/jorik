@@ -281,7 +281,7 @@ export async function sendTelegramArchive(options: {
   try {
     // A remote cache hit may have skipped preparation even if local cache was
     // evicted. Prepare lazily ONLY after Telegram explicitly rejects reuse.
-    if (options.prepare) {
+    if (options.prepare && key) {
       progress({ phase: "preparing", percent: null });
       v = { ...archive, ...(await options.prepare(archive.entry_id, key)) };
       db.prepare(

@@ -547,3 +547,23 @@ test("Store/adapter marks lost acknowledgement unknown and does not resend; the 
     integration.client = undefined;
   });
 });
+
+test("Legacy queued jobs keep their originally prepared video, without substituting a changed archive source", async () =>
+  fixture(async (f) => {
+    await sendTelegramArchive({
+      ...f.options,
+      archive: { ...f.options.archive, source_key: null },
+      prepare: async () => {
+        throw Error("Legacy job must never prepare a different source");
+      },
+    });
+    assert.deepEqual(f.events, ["upload", "new"]);
+    assert.equal(
+      cachedTelegramArchiveMedia(
+        f.db,
+        "telegram-1",
+        f.options.archive.source_key,
+      ),
+      undefined,
+    );
+  }));
