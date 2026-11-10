@@ -5,22 +5,102 @@
   border-radius: 16px;
   min-width: 0;
 }
-.archive-widget {
+/* Native modal keeps focus in the drawer while the current page stays mounted. */
+.archive-drawer {
   position: fixed;
-  z-index: 25;
-  right: 20px;
-  bottom: 20px;
-  box-shadow: 0 8px 32px #0002;
-  max-height: calc(100dvh - 120px);
-  width: 350px;
+  inset: 0 0 0 auto;
+  margin: 0;
+  padding: 0;
+  width: min(520px, calc(100vw - 80px));
+  max-width: none;
+  height: 100dvh;
+  max-height: 100dvh;
+  border: 0;
+  border-left: 1px solid var(--line, #e2e8f0);
+  border-radius: 20px 0 0 20px;
+  background: var(--surface, #fff);
+  color: var(--ink, #0f172a);
+  box-shadow: -16px 0 60px #0003;
+  overflow: hidden;
+}
+.archive-drawer[open] {
   display: flex;
   flex-direction: column;
+  animation: archive-drawer-enter 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
-.archive-widget:not(.is-open) {
-  width: auto;
+.archive-drawer::backdrop {
+  background: #0f172a66;
+  animation: archive-backdrop-enter 240ms ease-out both;
 }
-.has-order-panel .archive-widget {
-  right: calc(var(--order-panel-width, 440px) + 24px);
+.archive-drawer.is-closing {
+  animation: archive-drawer-exit 180ms ease-in both;
+}
+.archive-drawer.is-closing::backdrop {
+  animation: archive-backdrop-exit 180ms ease-in both;
+}
+.archive-drawer-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.archive-drawer-content .archive-results {
+  flex: 1;
+}
+.archive-drawer-content header {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 14px;
+}
+.archive-drawer-content header > button {
+  flex-shrink: 0;
+}
+@keyframes archive-drawer-enter {
+  from {
+    transform: translateX(100%);
+    opacity: 0.5;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+@keyframes archive-drawer-exit {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0.5;
+  }
+}
+@keyframes archive-backdrop-enter {
+  from {
+    background: #0f172a00;
+  }
+  to {
+    background: #0f172a66;
+  }
+}
+@keyframes archive-backdrop-exit {
+  from {
+    background: #0f172a66;
+  }
+  to {
+    background: #0f172a00;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .archive-drawer[open],
+  .archive-drawer.is-closing,
+  .archive-drawer::backdrop,
+  .archive-drawer.is-closing::backdrop {
+    animation: none;
+  }
 }
 .archive-search header {
   display: flex;
@@ -58,11 +138,6 @@
 .archive-browser button:disabled {
   opacity: 0.5;
   cursor: default;
-}
-.archive-search .archive-launch {
-  padding: 12px 16px;
-  border: none;
-  background: transparent;
 }
 .archive-input {
   display: flex;
@@ -167,42 +242,16 @@
 .archive-target {
   padding: 0 14px 6px;
 }
-.archive-page {
-  animation: archive-page-enter 220ms ease-out both;
-  margin: 20px;
-  max-width: 760px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.archive-page .archive-results {
-  flex: 1;
-}
-@keyframes archive-page-enter {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .archive-page { animation: none; }
-}
 @media (max-width: 767px) {
-  .archive-widget {
-    display: none;
-  }
-  .archive-page {
-    margin: 12px;
-    border-radius: 12px;
-    max-width: none;
+  .archive-drawer {
+    width: calc(100vw - 16px);
+    border-radius: 16px 0 0 16px;
   }
   .sidebar .rail-button.theme-nav {
     display: none;
   }
-  .archive-results {
-    flex: 1;
-  }
-  .archive-page header {
-    padding: 12px;
+  .archive-drawer-content header {
+    padding: 14px;
   }
 }
 
@@ -384,4 +433,17 @@
     flex-direction: column;
     align-items: stretch;
   }
+}
+
+.archive-pdf-preview {
+  min-width: 0;
+}
+.archive-pdf-frame {
+  display: block;
+  width: 100%;
+  height: min(68dvh, 720px);
+  min-height: 240px;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 10px;
+  background: #fff;
 }

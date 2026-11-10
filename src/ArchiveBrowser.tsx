@@ -4,6 +4,7 @@ import {
   Download,
   ExternalLink,
   Folder,
+  FileText,
   Loader,
   Send,
   Video,
@@ -61,6 +62,63 @@ export default function ArchiveBrowser({
       : null,
   );
   const [mediaError, setMediaError] = useState(false);
+  const [pdfState, setPdfState] = useState<"loading" | "ready" | "error">(
+    "loading",
+  );
+  const [pdfError, setPdfError] = useState("");
+  const [pdfRetry, setPdfRetry] = useState(0);
+  const pdfUrl =
+    media?.ext === ".pdf"
+      ? url("file", entry.id, media.relativePath) + "&preview=1"
+      : "";
+  useEffect(() => {
+    if (!pdfUrl) return;
+    const controller = new AbortController();
+    let timedOut = false;
+    setPdfState("loading");
+    setPdfError("");
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 20000);
+    void fetch(pdfUrl, {
+      signal: controller.signal,
+      headers: { Range: "bytes=0-0" },
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        const ok =
+          response.ok &&
+          (response.headers.get("content-type") || "").startsWith(
+            "application/pdf",
+          );
+        await response.body?.cancel();
+        if (!ok)
+          throw Error(
+            response.status === 503
+              ? "Сервер занят. Повторите просмотр."
+              : "Не удалось открыть PDF. Попробуйте снова или скачайте файл.",
+          );
+        if (!controller.signal.aborted) setPdfState("ready");
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted || timedOut) {
+          setPdfState("error");
+          setPdfError(
+            timedOut
+              ? "PDF не ответил вовремя. Повторите просмотр."
+              : error instanceof Error
+                ? error.message
+                : "Не удалось открыть PDF",
+          );
+        }
+      })
+      .finally(() => clearTimeout(timer));
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [pdfUrl, pdfRetry]);
   useEffect(() => {
     const element = dialog.current;
     element?.showModal();
@@ -184,6 +242,37 @@ export default function ArchiveBrowser({
                   alt={preview.name}
                   onError={() => setMediaError(true)}
                 />
+              ) : pdfUrl ? (
+                <div className="archive-pdf-preview">
+                  {pdfState === "loading" && (
+                    <p role="status">
+                      <Loader size={16} /> Открываем PDF…
+                    </p>
+                  )}
+                  {pdfState === "error" && (
+                    <p role="alert" className="archive-browser-error">
+                      {pdfError}{" "}
+                      <button onClick={() => setPdfRetry((n) => n + 1)}>
+                        Повторить просмотр
+                      </button>
+                    </p>
+                  )}
+                  {pdfState === "ready" && (
+                    <iframe
+                      key={pdfUrl}
+                      className="archive-pdf-frame"
+                      src={pdfUrl + "#toolbar=1&view=FitH"}
+                      title={"Предпросмотр PDF: " + preview.name}
+                    />
+                  )}
+                  <p className="archive-browser-note">
+                    PDF открывается в просмотрщике браузера. Если документ не
+                    отображается, откройте его в новой вкладке.
+                  </p>
+                  <a href={pdfUrl} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink size={15} /> Открыть PDF в новой вкладке
+                  </a>
+                </div>
               ) : (
                 <video
                   key={entry.id + preview.relativePath}
@@ -309,14 +398,18 @@ export default function ArchiveBrowser({
                             </small>
                           </div>
                           <div className="archive-browser-toolbar">
-                            {e.type === "video" && (
+                            {(e.type === "video" || e.ext === ".pdf") && (
                               <button
                                 onClick={() => {
                                   setMedia(e);
                                   setMediaError(false);
                                 }}
                               >
-                                <Video size={15} />
+                                {e.ext === ".pdf" ? (
+                                  <FileText size={15} />
+                                ) : (
+                                  <Video size={15} />
+                                )}
                                 Предпросмотр
                               </button>
                             )}

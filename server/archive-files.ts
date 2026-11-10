@@ -213,15 +213,44 @@ export function registerArchiveFiles(
   });
   app.get("/api/archive/file", { compress: false }, async (req, reply) => {
     const q = query
-      .extend({ download: z.enum(["0", "1"]).default("0") })
+      .extend({
+        download: z.enum(["0", "1"]).default("0"),
+        preview: z.enum(["0", "1"]).default("0"),
+      })
       .parse(req.query);
     acquire(reply);
     const original = await files.resolve(q.id, q.file);
     if (!original.stat.isFile()) throw fail("Выберите файл в папке");
+    const pdfPreview = q.preview === "1" && q.download === "0";
+    if (pdfPreview) {
+      if (!/\.pdf$/i.test(original.file))
+        throw fail("Предпросмотр доступен только для PDF", 415);
+      const handle = await fs.open(original.file, "r").catch(() => {
+        throw fail("Не удалось открыть PDF. Повторите просмотр.", 503);
+      });
+      try {
+        const header = Buffer.alloc(1024);
+        const { bytesRead } = await handle.read(header, 0, header.length, 0);
+        if (!header.subarray(0, bytesRead).includes(Buffer.from("%PDF-")))
+          throw fail("Файл не является корректным PDF", 415);
+      } finally {
+        await handle.close();
+      }
+      reply
+        .type("application/pdf")
+        .header("X-Frame-Options", "SAMEORIGIN")
+        .header("Content-Security-Policy", "frame-ancestors 'self'");
+      const report = reply.getHeader("Content-Security-Policy-Report-Only");
+      if (typeof report === "string")
+        reply.header(
+          "Content-Security-Policy-Report-Only",
+          report.replace("frame-ancestors 'none'", "frame-ancestors 'self'"),
+        );
+    }
     let file = original.file;
     if (q.download === "0" && original.entry.type === "video")
       file = (await video.cachedFile(q.id)) || file;
-    const inline = image.test(file) || movie.test(file);
+    const inline = image.test(file) || movie.test(file) || pdfPreview;
     const disposition = q.download === "1" || !inline ? "attachment" : "inline";
     const filename = path.basename(original.file);
     reply
@@ -234,7 +263,7 @@ export function registerArchiveFiles(
     return reply.sendFile(path.basename(file), path.dirname(file), {
       cacheControl: false,
       acceptRanges: true,
-      contentType: inline,
+      contentType: inline && !pdfPreview,
     });
   });
 }

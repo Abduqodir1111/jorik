@@ -33,16 +33,17 @@ async function request<T>(
   return d;
 }
 export default function ArchiveSearch({
-  fullPage,
+  open,
+  onClose,
   conversationId,
   chatName,
 }: {
-  fullPage: boolean;
+  open: boolean;
+  onClose: () => void;
   conversationId?: string;
   chatName?: string;
 }) {
-  const [open, setOpen] = useState(false),
-    [q, setQ] = useState(""),
+  const [q, setQ] = useState(""),
     [entries, setEntries] = useState<ArchiveEntry[]>([]),
     [books, setBooks] = useState<ArchiveBook[]>([]),
     [loading, setLoading] = useState(false),
@@ -70,8 +71,35 @@ export default function ArchiveSearch({
       key: string;
     } | null>(null),
     lock = useRef(false);
-  const active = fullPage || open;
+  const active = open;
+  const dialog = useRef<HTMLDialogElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const [closing, setClosing] = useState(false);
   const [preview, setPreview] = useState<ArchiveEntry | null>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    if (open) {
+      setClosing(false);
+      if (!element?.open) element?.showModal();
+      input.current?.focus({ preventScroll: true });
+    } else {
+      element?.close();
+      setPreview(null);
+      setClosing(false);
+    }
+    return () => {
+      element?.close();
+    };
+  }, [open]);
+  useEffect(() => {
+    if (!closing) return;
+    const timer = setTimeout(onClose, 180);
+    return () => clearTimeout(timer);
+  }, [closing, onClose]);
+  function close() {
+    if (open && !closing) setClosing(true);
+  }
+
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();
@@ -234,216 +262,219 @@ export default function ArchiveSearch({
   };
   return (
     <>
-      <section
-        className={
-          "archive-search " +
-          (fullPage ? "archive-page" : "archive-widget") +
-          (open ? " is-open" : "")
-        }
+      <dialog
+        ref={dialog}
+        id="archive-search-drawer"
+        className={"archive-drawer" + (closing ? " is-closing" : "")}
         aria-label="Поиск по архиву"
+        onCancel={(event) => {
+          event.preventDefault();
+          close();
+        }}
+        onClick={(event) => {
+          if (event.target !== event.currentTarget) return;
+          const rect = event.currentTarget.getBoundingClientRect();
+          if (
+            event.clientX < rect.left ||
+            event.clientX > rect.right ||
+            event.clientY < rect.top ||
+            event.clientY > rect.bottom
+          )
+            close();
+        }}
       >
-        {!fullPage && !open ? (
-          <button className="archive-launch" onClick={() => setOpen(true)}>
+        <section
+          className="archive-search archive-drawer-content"
+          aria-label="Поиск по архиву"
+        >
+          <header>
+            <div>
+              <b>Поиск по архиву</b>
+              <small>Книги, манга и видеообзоры</small>
+            </div>
+            <button aria-label="Закрыть поиск" onClick={close}>
+              <X size={18} />
+            </button>
+          </header>
+          <label className="archive-input">
             <Search size={18} />
-            Поиск по архиву
-          </button>
-        ) : (
-          <>
-            <header>
-              <div>
-                <b>Поиск по архиву</b>
-                <small>Книги, манга и видеообзоры</small>
-              </div>
-              {!fullPage && (
-                <button
-                  aria-label="Закрыть поиск"
-                  onClick={() => setOpen(false)}
-                >
-                  <X size={18} />
-                </button>
-              )}
-            </header>
-            <label className="archive-input">
-              <Search size={18} />
-              <input
-                aria-label="Название в архиве"
-                placeholder="Название книги или обзора…"
-                value={q}
-                onChange={(e) => {
-                  catalogRequest.current?.abort();
-                  catalogRequest.current = null;
-                  setCatalogLoading(false);
-                  setCatalogError("");
-                  setQ(e.target.value);
-                  setBookQuery("");
-                }}
-              />
-            </label>
-            <div className="archive-status">
-              {status?.indexing
-                ? "Обновляем индекс…"
-                : status?.error ||
-                  (!status?.enabled
-                    ? "Архив не подключён"
-                    : status.updatedAt
-                      ? `В архиве: ${status.count}`
-                      : "Подготавливаем индекс…")}
-              <button
-                title="Обновить индекс"
-                aria-label="Обновить индекс"
-                disabled={!status?.enabled || status.indexing}
-                onClick={() =>
-                  void request("/reindex", {})
-                    .then(() =>
-                      setStatus((s) => (s ? { ...s, indexing: true } : s)),
-                    )
-                    .catch((e) => setError(e.message))
-                }
-              >
-                <RefreshCw size={14} />
-              </button>
-            </div>
-            {conversationId && (
-              <small className="archive-target">Отправка в: {chatName}</small>
-            )}
-            {error && (
-              <p className="archive-error" role="alert">
-                {error}
-              </p>
-            )}
-            {job && (
-              <p className={"archive-job " + job.state} role="status">
-                {labels[job.state]} · {target}
-                {job.error && <small>{job.error}</small>}
-              </p>
-            )}
-            <div
-              className="archive-results"
-              aria-busy={loading || catalogLoading}
+            <input
+              ref={input}
+              aria-label="Название в архиве"
+              placeholder="Название книги или обзора…"
+              value={q}
+              onChange={(e) => {
+                catalogRequest.current?.abort();
+                catalogRequest.current = null;
+                setCatalogLoading(false);
+                setCatalogError("");
+                setQ(e.target.value);
+                setBookQuery("");
+              }}
+            />
+          </label>
+          <div className="archive-status">
+            {status?.indexing
+              ? "Обновляем индекс…"
+              : status?.error ||
+                (!status?.enabled
+                  ? "Архив не подключён"
+                  : status.updatedAt
+                    ? `В архиве: ${status.count}`
+                    : "Подготавливаем индекс…")}
+            <button
+              title="Обновить индекс"
+              aria-label="Обновить индекс"
+              disabled={!status?.enabled || status.indexing}
+              onClick={() =>
+                void request("/reindex", {})
+                  .then(() =>
+                    setStatus((s) => (s ? { ...s, indexing: true } : s)),
+                  )
+                  .catch((e) => setError(e.message))
+              }
             >
-              {(loading || catalogLoading) && (
-                <p className="archive-hint">
-                  <Loader size={16} /> Ищем…
-                </p>
-              )}
-              {entries.map((e) => (
-                <article key={e.id}>
-                  <div className="archive-entry-title">
+              <RefreshCw size={14} />
+            </button>
+          </div>
+          {conversationId && (
+            <small className="archive-target">Отправка в: {chatName}</small>
+          )}
+          {error && (
+            <p className="archive-error" role="alert">
+              {error}
+            </p>
+          )}
+          {job && (
+            <p className={"archive-job " + job.state} role="status">
+              {labels[job.state]} · {target}
+              {job.error && <small>{job.error}</small>}
+            </p>
+          )}
+          <div
+            className="archive-results"
+            aria-busy={loading || catalogLoading}
+          >
+            {(loading || catalogLoading) && (
+              <p className="archive-hint">
+                <Loader size={16} /> Ищем…
+              </p>
+            )}
+            {entries.map((e) => (
+              <article key={e.id}>
+                <div className="archive-entry-title">
+                  {e.type === "folder" ? (
+                    <Folder size={18} />
+                  ) : (
+                    <Video size={18} />
+                  )}
+                  <b>
+                    {e.type === "video"
+                      ? e.name.replace(/\.(mp4|mov)$/i, "")
+                      : e.name}
+                  </b>
+                </div>
+                <span className={"archive-source " + e.source.toLowerCase()}>
+                  {e.source.toUpperCase()}
+                </span>
+                <div className="archive-actions">
+                  <button onClick={() => setPreview(e)}>
                     {e.type === "folder" ? (
-                      <Folder size={18} />
+                      <Folder size={14} />
                     ) : (
-                      <Video size={18} />
+                      <Video size={14} />
                     )}
-                    <b>
-                      {e.type === "video"
-                        ? e.name.replace(/\.(mp4|mov)$/i, "")
-                        : e.name}
-                    </b>
-                  </div>
-                  <span className={"archive-source " + e.source.toLowerCase()}>
-                    {e.source.toUpperCase()}
-                  </span>
-                  <div className="archive-actions">
-                    <button onClick={() => setPreview(e)}>
-                      {e.type === "folder" ? (
-                        <Folder size={14} />
-                      ) : (
-                        <Video size={14} />
-                      )}
-                      {e.type === "folder" ? "Открыть" : "Предпросмотр"}
-                    </button>
-                    <a
-                      href={"/archive-open.html?id=" + encodeURIComponent(e.id)}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    {e.type === "folder" ? "Открыть" : "Предпросмотр"}
+                  </button>
+                  <a
+                    href={"/archive-open.html?id=" + encodeURIComponent(e.id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <ExternalLink size={14} />
+                    Поделиться ссылкой
+                  </a>
+                  {e.type === "video" && (
+                    <button
+                      disabled={!conversationId || busy}
+                      onClick={() => void send(e)}
                     >
-                      <ExternalLink size={14} />
-                      Поделиться ссылкой
-                    </a>
-                    {e.type === "video" && (
-                      <button
-                        disabled={!conversationId || busy}
-                        onClick={() => void send(e)}
+                      <Send size={14} />В чат
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
+            {!loading && q.trim().length >= 2 && !entries.length && (
+              <p className="archive-hint">В локальном архиве совпадений нет.</p>
+            )}
+            {q.trim().length >= 2 && (
+              <button
+                className="archive-catalog"
+                disabled={catalogLoading}
+                onClick={() => void findBooks()}
+              >
+                {catalogError
+                  ? "Повторить поиск во Флибусте"
+                  : "Найти во Флибусте"}
+              </button>
+            )}
+            {catalogError && (
+              <p className="archive-error" role="alert">
+                {catalogError}
+              </p>
+            )}
+            {bookQuery === normalizeArchiveQuery(q) &&
+              books.map((b, i) => {
+                const format =
+                  b.formats.find((f) => f.downloadPath === formats[b.id]) ||
+                  b.formats[0];
+                return (
+                  <article key={b.id + ":" + i}>
+                    <b>{b.title}</b>
+                    <small>{b.author}</small>
+                    <div className="archive-actions">
+                      <select
+                        aria-label={"Формат: " + b.title}
+                        value={format.downloadPath}
+                        onChange={(e) =>
+                          setFormats((s) => ({
+                            ...s,
+                            [b.id]: e.target.value,
+                          }))
+                        }
                       >
-                        <Send size={14} />В чат
-                      </button>
-                    )}
-                  </div>
-                </article>
-              ))}
-              {!loading && q.trim().length >= 2 && !entries.length && (
+                        {b.formats.map((f) => (
+                          <option key={f.downloadPath} value={f.downloadPath}>
+                            {f.ext.toUpperCase()}
+                          </option>
+                        ))}
+                      </select>
+                      <a
+                        href={
+                          "/api/archive/flibusta/download?path=" +
+                          encodeURIComponent(format.downloadPath) +
+                          "&title=" +
+                          encodeURIComponent(b.author + " - " + b.title)
+                        }
+                      >
+                        <Download size={14} /> Скачать
+                      </a>
+                    </div>
+                  </article>
+                );
+              })}
+            {!loading &&
+              bookQuery === normalizeArchiveQuery(q) &&
+              !books.length &&
+              bookQuery && (
                 <p className="archive-hint">
-                  В локальном архиве совпадений нет.
+                  Каталог не вернул книг с доступными форматами.
                 </p>
               )}
-              {q.trim().length >= 2 && (
-                <button
-                  className="archive-catalog"
-                  disabled={catalogLoading}
-                  onClick={() => void findBooks()}
-                >
-                  {catalogError
-                    ? "Повторить поиск во Флибусте"
-                    : "Найти во Флибусте"}
-                </button>
-              )}
-              {catalogError && (
-                <p className="archive-error" role="alert">
-                  {catalogError}
-                </p>
-              )}
-              {bookQuery === normalizeArchiveQuery(q) &&
-                books.map((b, i) => {
-                  const format =
-                    b.formats.find((f) => f.downloadPath === formats[b.id]) ||
-                    b.formats[0];
-                  return (
-                    <article key={b.id + ":" + i}>
-                      <b>{b.title}</b>
-                      <small>{b.author}</small>
-                      <div className="archive-actions">
-                        <select
-                          aria-label={"Формат: " + b.title}
-                          value={format.downloadPath}
-                          onChange={(e) =>
-                            setFormats((s) => ({
-                              ...s,
-                              [b.id]: e.target.value,
-                            }))
-                          }
-                        >
-                          {b.formats.map((f) => (
-                            <option key={f.downloadPath} value={f.downloadPath}>
-                              {f.ext.toUpperCase()}
-                            </option>
-                          ))}
-                        </select>
-                        <a
-                          href={
-                            "/api/archive/flibusta/download?path=" +
-                            encodeURIComponent(format.downloadPath) +
-                            "&title=" +
-                            encodeURIComponent(b.author + " - " + b.title)
-                          }
-                        >
-                          <Download size={14} /> Скачать
-                        </a>
-                      </div>
-                    </article>
-                  );
-                })}
-              {!loading &&
-                bookQuery === normalizeArchiveQuery(q) &&
-                !books.length &&
-                bookQuery && (
-                  <p className="archive-hint">
-                    Каталог не вернул книг с доступными форматами.
-                  </p>
-                )}
-            </div>
-          </>
-        )}
-      </section>
+          </div>
+        </section>
+      </dialog>
       {preview && (
         <ArchiveBrowser
           key={preview.id}

@@ -277,3 +277,87 @@ test("Video preview reuses only the current finished cache; download always retu
     await f.close();
   }
 });
+
+test("PDF preview is authenticated, same-origin and streamed with Range while downloads stay attachments", async () => {
+  const f = await fixture();
+  const file = "Том 1/preview.pdf";
+  const pdf = Buffer.from("%PDF-1.7\n" + "sample document\n".repeat(100));
+  try {
+    await fs.writeFile(path.join(f.child, "preview.pdf"), pdf);
+    const normal = await f.app.inject(address("file", f.id, file));
+    assert.match(String(normal.headers["content-disposition"]), /^attachment/);
+    assert.equal(normal.headers["x-frame-options"], "DENY");
+    const view = await f.app.inject(
+      address("file", f.id, file, { preview: "1" }),
+    );
+    assert.equal(view.statusCode, 200);
+    assert.deepEqual(view.rawPayload, pdf);
+    assert.match(String(view.headers["content-type"]), /^application\/pdf/);
+    assert.match(String(view.headers["content-disposition"]), /^inline/);
+    assert.equal(view.headers["x-frame-options"], "SAMEORIGIN");
+    assert.equal(view.headers["x-content-type-options"], "nosniff");
+    assert.equal(
+      view.headers["content-security-policy"],
+      "frame-ancestors 'self'",
+    );
+    assert.match(
+      String(view.headers["content-security-policy-report-only"]),
+      /frame-ancestors 'self'/,
+    );
+    assert.equal(view.headers["cache-control"], "no-store");
+    const partial = await f.app.inject({
+      url: address("file", f.id, file, { preview: "1" }),
+      headers: { range: "bytes=0-7", "accept-encoding": "gzip" },
+    });
+    assert.equal(partial.statusCode, 206);
+    assert.equal(partial.body, "%PDF-1.7");
+    assert.equal(partial.headers["content-range"], "bytes 0-7/" + pdf.length);
+    assert.equal(partial.headers["content-encoding"], undefined);
+    assert.match(String(partial.headers["content-type"]), /^application\/pdf/);
+    const head = await f.app.inject({
+      method: "HEAD",
+      url: address("file", f.id, file, { preview: "1" }),
+    });
+    assert.equal(head.statusCode, 200);
+    assert.equal(head.body, "");
+    assert.equal(head.headers["content-length"], String(pdf.length));
+    const download = await f.app.inject(
+      address("file", f.id, file, { preview: "1", download: "1" }),
+    );
+    assert.match(
+      String(download.headers["content-disposition"]),
+      /^attachment/,
+    );
+    assert.equal(download.headers["x-frame-options"], "DENY");
+    for (const name of ["Том 1/книга's.pdf", "unsafe.html", "photo.jpg"]) {
+      const invalid = await f.app.inject(
+        address("file", f.id, name, { preview: "1" }),
+      );
+      assert.equal(invalid.statusCode, 415);
+      assert.equal(invalid.headers["x-frame-options"], "DENY");
+    }
+    assert.equal(
+      (
+        await f.app.inject(
+          address("file", f.id, "../preview.pdf", { preview: "1" }),
+        )
+      ).statusCode,
+      404,
+    );
+  } finally {
+    await f.close();
+  }
+  const secure = await fixture(false);
+  try {
+    assert.equal(
+      (
+        await secure.app.inject(
+          address("file", secure.id, file, { preview: "1" }),
+        )
+      ).statusCode,
+      401,
+    );
+  } finally {
+    await secure.close();
+  }
+});

@@ -126,6 +126,11 @@ export default function App() {
   const [showAllChats, setShowAllChats] = useState(false);
   const [rememberLogin, setRememberLogin] = useState(true);
   const [accountsExpanded, setAccountsExpanded] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const closeArchive = useCallback(() => setArchiveOpen(false), []);
+  useEffect(() => {
+    if (!auth) setArchiveOpen(false);
+  }, [auth]);
   const [accounts, setAccounts] = useState<Account[]>([]),
     [conversations, setConversations] = useState<Conversation[]>([]),
     [messages, setMessages] = useState<Message[]>([]),
@@ -959,13 +964,13 @@ export default function App() {
           <span className="rail-label">Заказы</span>
         </button>
         <button
-          className={
-            "rail-button archive-nav " + (page === "archive" ? "active" : "")
-          }
+          className={"rail-button archive-nav " + (archiveOpen ? "active" : "")}
           aria-label="Поиск по архиву"
           title="Поиск по архиву"
-          aria-current={page === "archive" ? "page" : undefined}
-          onClick={() => setPage("archive")}
+          aria-haspopup="dialog"
+          aria-expanded={archiveOpen}
+          aria-controls="archive-search-drawer"
+          onClick={() => setArchiveOpen(true)}
         >
           <Search size={22} />
           <span className="rail-label">Поиск</span>
@@ -1002,9 +1007,7 @@ export default function App() {
                 ? "Входящие"
                 : page === "orders"
                   ? "Заказы"
-                  : page === "archive"
-                    ? "Поиск по архиву"
-                    : "Настройки"}
+                  : "Настройки"}
             </b>
           </div>
           <span className={mode === "demo" ? "demo-label" : "real-label"}>
@@ -1657,17 +1660,16 @@ export default function App() {
             onPanelChange={setOrderPanelOpen}
           />
         </Suspense>
-        {page === "archive" && (
-          <Suspense fallback={<p className="page-content">Открываем поиск…</p>}>
-            <ArchiveSearch
-              fullPage
-              conversationId={c?.id}
-              chatName={
-                c ? `${c.username || c.name} · ${a?.name || ""}` : undefined
-              }
-            />
-          </Suspense>
-        )}
+        <Suspense fallback={null}>
+          <ArchiveSearch
+            open={archiveOpen}
+            onClose={closeArchive}
+            conversationId={c?.id}
+            chatName={
+              c ? `${c.username || c.name} · ${a?.name || ""}` : undefined
+            }
+          />
+        </Suspense>
         {page === "settings" && (
           <Suspense
             fallback={<p className="page-content">Загружаем настройки…</p>}
