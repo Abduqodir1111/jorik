@@ -11,6 +11,7 @@ import { ChatCache } from "./chat-cache";
 import PlatformIcon from "./PlatformIcon";
 import AccountName from "./AccountName";
 import { recentConversations } from "../shared/inbox";
+import { instagramReplyWindow } from "../shared/instagram-reply-window";
 import TelegramConnect from "./TelegramConnect";
 import {
   lazy,
@@ -560,16 +561,9 @@ export default function App() {
   );
   const c = conversations.find((c) => c.id === selected),
     a = c ? accountsById.get(c.accountId) : undefined;
-  const lastInstagramIncoming =
-    a?.adapter === "instagram-graph"
-      ? messages.filter((m) => m.direction === "in").at(-1)
-      : undefined;
-  const lastInstagramIncomingAt =
-    c?.lastIncomingAt || lastInstagramIncoming?.createdAt;
+  const replyWindow = instagramReplyWindow(c, messages, clockNow);
   const instagramWindowClosed =
-    a?.adapter === "instagram-graph" &&
-    (!lastInstagramIncomingAt ||
-      clockNow - Date.parse(lastInstagramIncomingAt) >= 86400000);
+    a?.adapter === "instagram-graph" && replyWindow.closed;
   const filtered = useMemo(() => {
     const query = q.toLocaleLowerCase();
     const matches = new Set(searchIds);
@@ -1205,7 +1199,7 @@ export default function App() {
                       >
                         {instagramWindowClosed
                           ? "Окно ответа Meta закрыто"
-                          : `Окно Meta: ещё ${Math.max(1, Math.ceil((Date.parse(lastInstagramIncoming!.createdAt) + 86400000 - clockNow) / 60000))} мин`}
+                          : `Окно Meta: ещё ${replyWindow.remainingMinutes} мин`}
                       </span>
                     )}
                   </div>
