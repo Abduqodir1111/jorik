@@ -13,6 +13,10 @@ import {
 import type { ArchiveEntry, ArchiveJob, ArchiveBook } from "../shared/archive";
 import "./archive-search.css";
 import ArchiveBrowser from "./ArchiveBrowser";
+import {
+  archiveContainsTitle,
+  normalizeArchiveQuery,
+} from "../shared/archive-query";
 async function request<T>(
   url: string,
   body?: unknown,
@@ -50,6 +54,11 @@ export default function ArchiveSearch({
     count: number;
     enabled: boolean;
   } | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState("");
+  const catalogRequest = useRef<AbortController | null>(null);
+  const currentQuery = useRef(q);
+  currentQuery.current = q;
   const [bookQuery, setBookQuery] = useState(""),
     [formats, setFormats] = useState<Record<string, string>>({});
   const [job, setJob] = useState<ArchiveJob | null>(null),
@@ -78,6 +87,11 @@ export default function ArchiveSearch({
     };
   }, [active]);
   useEffect(() => {
+    catalogRequest.current?.abort();
+    catalogRequest.current = null;
+    setCatalogLoading(false);
+    setCatalogError("");
+    setBookQuery("");
     if (!active) return;
     const controller = new AbortController();
     setError("");
@@ -95,20 +109,11 @@ export default function ArchiveSearch({
         controller.signal,
       )
         .then(async (matches) => {
+          if (controller.signal.aborted) return;
           setEntries(matches);
-          if (
-            !matches.length &&
-            status?.updatedAt &&
-            !controller.signal.aborted
-          ) {
-            setBookQuery(q.trim());
-            setBooks(
-              await request<ArchiveBook[]>(
-                "/flibusta/search?q=" + encodeURIComponent(q.trim()),
-                undefined,
-                controller.signal,
-              ),
-            );
+          if (status?.updatedAt && !archiveContainsTitle(matches, q)) {
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            if (!controller.signal.aborted) void findBooks(q);
           }
         })
         .catch((e) => {
@@ -171,23 +176,51 @@ export default function ArchiveSearch({
       setSending(false);
     }
   }
-  async function findBooks() {
-    if (q.trim().length < 2) return;
-    setBookQuery(q.trim());
-    setLoading(true);
-    setError("");
+  async function findBooks(query = q) {
+    const clean = normalizeArchiveQuery(query);
+    if (clean.length < 2 || catalogRequest.current) return;
+    const controller = new AbortController();
+    catalogRequest.current = controller;
+    setBookQuery("");
+    setBooks([]);
+    setCatalogLoading(true);
+    setCatalogError("");
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 30000);
+    const current = () =>
+      catalogRequest.current === controller &&
+      normalizeArchiveQuery(currentQuery.current) === clean;
     try {
-      setBooks(
-        await request<ArchiveBook[]>(
-          "/flibusta/search?q=" + encodeURIComponent(q.trim()),
-        ),
+      const result = await request<ArchiveBook[]>(
+        "/flibusta/search?q=" + encodeURIComponent(clean),
+        undefined,
+        controller.signal,
       );
+      if (current() && !controller.signal.aborted) {
+        setBooks(result);
+        setBookQuery(clean);
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Каталог недоступен");
+      if (current() && (!controller.signal.aborted || timedOut))
+        setCatalogError(
+          timedOut
+            ? "Каталог не ответил вовремя. Повторите поиск."
+            : e instanceof Error
+              ? e.message
+              : "Каталог недоступен. Повторите поиск.",
+        );
     } finally {
-      setLoading(false);
+      clearTimeout(timer);
+      if (current()) {
+        catalogRequest.current = null;
+        setCatalogLoading(false);
+      }
     }
   }
+  useEffect(() => () => catalogRequest.current?.abort(), []);
   const busy =
     sending ||
     (!!job && ["preparing", "queued", "sending"].includes(job.state));
@@ -237,6 +270,10 @@ export default function ArchiveSearch({
                 placeholder="Название книги или обзора…"
                 value={q}
                 onChange={(e) => {
+                  catalogRequest.current?.abort();
+                  catalogRequest.current = null;
+                  setCatalogLoading(false);
+                  setCatalogError("");
                   setQ(e.target.value);
                   setBookQuery("");
                 }}
@@ -280,8 +317,11 @@ export default function ArchiveSearch({
                 {job.error && <small>{job.error}</small>}
               </p>
             )}
-            <div className="archive-results" aria-busy={loading}>
-              {loading && (
+            <div
+              className="archive-results"
+              aria-busy={loading || catalogLoading}
+            >
+              {(loading || catalogLoading) && (
                 <p className="archive-hint">
                   <Loader size={16} /> Ищем…
                 </p>
@@ -339,13 +379,20 @@ export default function ArchiveSearch({
               {q.trim().length >= 2 && (
                 <button
                   className="archive-catalog"
-                  disabled={loading}
+                  disabled={catalogLoading}
                   onClick={() => void findBooks()}
                 >
-                  Найти во Флибусте
+                  {catalogError
+                    ? "Повторить поиск во Флибусте"
+                    : "Найти во Флибусте"}
                 </button>
               )}
-              {bookQuery === q.trim() &&
+              {catalogError && (
+                <p className="archive-error" role="alert">
+                  {catalogError}
+                </p>
+              )}
+              {bookQuery === normalizeArchiveQuery(q) &&
                 books.map((b, i) => {
                   const format =
                     b.formats.find((f) => f.downloadPath === formats[b.id]) ||
@@ -386,7 +433,7 @@ export default function ArchiveSearch({
                   );
                 })}
               {!loading &&
-                bookQuery === q.trim() &&
+                bookQuery === normalizeArchiveQuery(q) &&
                 !books.length &&
                 bookQuery && (
                   <p className="archive-hint">
