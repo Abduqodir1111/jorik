@@ -19,7 +19,7 @@ const Context = createContext<{
   addTemplate: () => void;
   removeTemplate: (id: string) => void;
   updateTemplate: (id: string, field: "title" | "text", value: string) => void;
-  hydrate: (value?: string) => void;
+  hydrate: (value?: string, serverVersion?: string) => void;
   saveStatus: string;
   saveSlots: () => Promise<void>;
   dark: boolean;
@@ -57,18 +57,20 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
     dirty = useRef(false),
     timer = useRef<ReturnType<typeof setTimeout> | null>(null),
     version = useRef(0),
-    chain = useRef(Promise.resolve());
+    chain = useRef(Promise.resolve()),
+    serverVersion = useRef<string | undefined>(undefined);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
     try {
       localStorage.setItem("jorik-theme", dark ? "dark" : "light");
     } catch {}
   }, [dark]);
-  const hydrate = (value?: string) => {
+  const hydrate = (value?: string, remoteVersion?: string) => {
     if (dirty.current) return;
     try {
       const parsed = normalizeQuickReplies(value ? JSON.parse(value) : []);
       if (parsed) {
+        serverVersion.current = remoteVersion;
         latest.current = parsed;
         setSlots((old) =>
           JSON.stringify(old) === JSON.stringify(parsed) ? old : parsed,
@@ -76,6 +78,22 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
       }
     } catch {}
   };
+  const headers = () => ({
+    "Content-Type": "application/json",
+    ...(serverVersion.current
+      ? { "If-Match": JSON.stringify(serverVersion.current) }
+      : {}),
+  });
+  async function persist(next: QuickReply[]) {
+    const r = await fetch("/api/quick-replies", {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify(next),
+    });
+    const data = await r.json();
+    if (!r.ok) throw Error(data.error || "Не удалось сохранить быстрые ответы");
+    serverVersion.current = data.version;
+  }
   function changeTemplates(next: QuickReply[]) {
     latest.current = next;
     setSlots(next);
@@ -87,20 +105,16 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
       chain.current = chain.current
         .catch(() => {})
         .then(async () => {
-          const r = await fetch("/api/quick-replies", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(next),
-          });
-          if (!r.ok) throw Error();
+          await persist(next);
           if (version.current === revision) {
             dirty.current = false;
             setSaveStatus("Сохранено");
           }
         })
-        .catch(() =>
+        .catch((error: Error) =>
           setSaveStatus(
-            "Не удалось сохранить. Измените поле, чтобы повторить.",
+            error.message ||
+              "Не удалось сохранить. Измените поле, чтобы повторить.",
           ),
         );
     }, 400);
@@ -128,19 +142,16 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
     const task = chain.current
       .catch(() => {})
       .then(async () => {
-        const r = await fetch("/api/quick-replies", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(next),
-        });
-        if (!r.ok) throw Error("Не удалось сохранить быстрые ответы");
+        await persist(next);
         if (version.current === revision) {
           dirty.current = false;
           setSaveStatus("Сохранено");
         }
       });
-    chain.current = task.catch(() => {
-      setSaveStatus("Не удалось сохранить. Повторите попытку.");
+    chain.current = task.catch((error: Error) => {
+      setSaveStatus(
+        error.message || "Не удалось сохранить. Повторите попытку.",
+      );
     });
     await task;
   }
@@ -149,7 +160,7 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
       if (dirty.current)
         void fetch("/api/quick-replies", {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: headers(),
           body: JSON.stringify(latest.current),
           keepalive: new Blob([JSON.stringify(latest.current)]).size < 60000,
         }).catch(() => {});

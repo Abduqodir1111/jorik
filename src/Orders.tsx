@@ -27,10 +27,14 @@ async function request<T>(
   route: string,
   method = "GET",
   body?: unknown,
+  version?: string,
 ): Promise<T> {
   const r = await fetch("/api/orders" + route, {
     method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers: {
+      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...(version ? { "If-Match": JSON.stringify(version) } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await r.json();
@@ -250,6 +254,7 @@ export default function Orders({
         editing ? "/" + editing.id : "",
         editing ? "PUT" : "POST",
         body,
+        editing?.updatedAt,
       );
       await load();
       close();
@@ -275,6 +280,7 @@ export default function Orders({
           "/" + o.id + (kind === "refuse" ? "/refused" : ""),
           kind === "delete" ? "DELETE" : "PATCH",
           kind === "refuse" ? { refused: !o.refused } : undefined,
+          o.updatedAt,
         );
         await load();
       } catch (e) {

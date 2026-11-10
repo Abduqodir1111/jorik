@@ -24,7 +24,7 @@ export class Store {
     this.changed();
   messageUpdated: (message: Message) => void = () => this.changed();
   publishMessage(id: string, conversationId: string) {
-    const message = this.messages(conversationId).find((m) => m.id === id);
+    const message = this.message(conversationId, id);
     if (message) this.messageUpdated(message);
   }
   resolveAdapter: (account: Account) => Adapter = adapterFor;
@@ -53,7 +53,17 @@ export class Store {
     if (!c) throw new Error("Диалог не найден");
     return { ...c, needsReply: c.unread > 0 };
   }
+  message(conversationId: string, messageId: string): Message | undefined {
+    return this.readMessages(conversationId, undefined, messageId)[0];
+  }
   messages(id: string, page?: { limit: number; before?: string }): Message[] {
+    return this.readMessages(id, page);
+  }
+  private readMessages(
+    id: string,
+    page?: { limit: number; before?: string },
+    messageId?: string,
+  ): Message[] {
     const cursor = page?.before
       ? (this.db
           .prepare(
@@ -66,24 +76,26 @@ export class Store {
     const select =
       "SELECT id,conversation_id AS conversationId,external_id AS externalId,direction,text,status,created_at AS createdAt,error,attachments,edited_at AS editedAt,reactions,reply_to_id AS replyToId,read_at AS readAt,reply_to_external_id AS replyExternalId,reply_to_snapshot AS replySnapshot FROM messages WHERE conversation_id=? AND deleted_at IS NULL";
     const rows = (
-      page
-        ? this.db
-            .prepare(
-              select +
-                (cursor
-                  ? " AND (created_at<? OR (created_at=? AND rowid<?))"
-                  : "") +
-                " ORDER BY created_at DESC,rowid DESC LIMIT ?",
-            )
-            .all(
-              id,
-              ...(cursor
-                ? [cursor.created_at, cursor.created_at, cursor.rowid]
-                : []),
-              page.limit,
-            )
-            .reverse()
-        : this.db.prepare(select + " ORDER BY created_at,rowid").all(id)
+      messageId
+        ? this.db.prepare(select + " AND id=?").all(id, messageId)
+        : page
+          ? this.db
+              .prepare(
+                select +
+                  (cursor
+                    ? " AND (created_at<? OR (created_at=? AND rowid<?))"
+                    : "") +
+                  " ORDER BY created_at DESC,rowid DESC LIMIT ?",
+              )
+              .all(
+                id,
+                ...(cursor
+                  ? [cursor.created_at, cursor.created_at, cursor.rowid]
+                  : []),
+                page.limit,
+              )
+              .reverse()
+          : this.db.prepare(select + " ORDER BY created_at,rowid").all(id)
     ) as (Omit<Message, "attachments"> & {
       attachments: string;
       reactions: string;
@@ -116,10 +128,17 @@ export class Store {
         (replyExternalId
           ? byExternal.get(canonical(replyExternalId))
           : undefined);
-      if (!target && page && (m.replyToId || replyExternalId)) {
+      if (!target && (page || messageId) && (m.replyToId || replyExternalId)) {
         target = this.db
-          .prepare(select + " AND (id=? OR external_id=?) LIMIT 1")
-          .get(id, m.replyToId || "", replyExternalId || "") as typeof target;
+          .prepare(
+            select + " AND (id=? OR external_id=? OR instagram_key=?) LIMIT 1",
+          )
+          .get(
+            id,
+            m.replyToId || "",
+            replyExternalId || "",
+            replyExternalId ? canonical(replyExternalId) : "",
+          ) as typeof target;
       }
       let snapshot: Message["reply_to"];
       if (replySnapshot) {
@@ -333,7 +352,7 @@ export class Store {
       const c = this.conversation(job.conversation_id),
         a = this.account(c.accountId),
         adapter = this.resolveAdapter(a),
-        m = this.messages(c.id).find((m) => m.id === job.message_id)!;
+        m = this.message(c.id, job.message_id)!;
       this.db.transaction(() => {
         this.db
           .prepare("UPDATE outbox SET state='sending' WHERE id=?")

@@ -933,9 +933,7 @@ export class TelegramIntegration {
         "Сообщение уже изменилось. Откройте редактирование заново.",
       );
     if (text === row.text)
-      return this.store
-        .messages(row.conversation_id)
-        .find((m) => m.id === messageId)!;
+      return this.store.message(row.conversation_id, messageId)!;
     if (this.actionLocks.has(messageId))
       throw new Error("Операция с сообщением уже выполняется.");
     this.actionLocks.add(messageId);
@@ -965,9 +963,7 @@ export class TelegramIntegration {
           messageId,
         );
       this.store.publishMessage(messageId, row.conversation_id);
-      return this.store
-        .messages(row.conversation_id)
-        .find((m) => m.id === messageId)!;
+      return this.store.message(row.conversation_id, messageId)!;
     } catch (e) {
       throw new Error(safeTelegramError(e));
     } finally {
@@ -1024,9 +1020,7 @@ export class TelegramIntegration {
           .run(JSON.stringify(telegramReactions(ms[0].reactions)), messageId);
         this.store.publishMessage(messageId, row.conversation_id);
       }
-      return this.store
-        .messages(row.conversation_id)
-        .find((m) => m.id === messageId)!;
+      return this.store.message(row.conversation_id, messageId)!;
     } catch (e) {
       throw new Error(safeTelegramError(e));
     }
@@ -1195,7 +1189,51 @@ export class TelegramIntegration {
       this.photos.delete(key);
     }
   }
-  private async downloadPhoto(messageId: string, video: boolean | "document") {
+  private fileRequests = new Map<
+    string,
+    Promise<{ file: string; mime: string; size: number }>
+  >();
+  async mediaFile(messageId: string, video: true | "document") {
+    const key = String(video) + ":" + messageId;
+    const existing = this.fileRequests.get(key);
+    if (existing) return existing;
+    const task = (async () => {
+      if (this.mediaActive >= 3)
+        await new Promise<void>((r) => this.mediaWaiting.push(r));
+      else this.mediaActive++;
+      try {
+        return await this.downloadPhoto(messageId, video, true);
+      } finally {
+        const next = this.mediaWaiting.shift();
+        if (next) next();
+        else this.mediaActive--;
+      }
+    })();
+    this.fileRequests.set(key, task);
+    try {
+      return await task;
+    } finally {
+      this.fileRequests.delete(key);
+    }
+  }
+  private downloadPhoto(
+    messageId: string,
+    video: boolean | "document",
+    fileOnly: true,
+  ): Promise<{ file: string; mime: string; size: number }>;
+  private downloadPhoto(
+    messageId: string,
+    video: boolean | "document",
+    fileOnly?: false,
+  ): Promise<{ bytes: Buffer; mime: string }>;
+  private async downloadPhoto(
+    messageId: string,
+    video: boolean | "document",
+    fileOnly = false,
+  ): Promise<
+    | { file: string; mime: string; size: number }
+    | { bytes: Buffer; mime: string }
+  > {
     const limit =
       video === "document"
         ? MAX_DOCUMENT_BYTES
@@ -1229,7 +1267,30 @@ export class TelegramIntegration {
           .digest("hex") +
         (video === "document" ? ".doc" : video ? ".mp4" : ".img"),
     );
+    const fileResult = async (target: string) => {
+      const stat = await fs.lstat(target);
+      if (
+        !stat.isFile() ||
+        stat.isSymbolicLink() ||
+        !stat.size ||
+        stat.size > limit
+      )
+        throw new Error("Некорректное вложение");
+      const handle = await fs.open(target, "r");
+      try {
+        const header = Buffer.alloc(1024),
+          { bytesRead } = await handle.read(header, 0, header.length, 0);
+        return {
+          file: target,
+          mime: mimeOf(header.subarray(0, bytesRead)),
+          size: stat.size,
+        };
+      } finally {
+        await handle.close();
+      }
+    };
     try {
+      if (fileOnly) return await fileResult(file);
       const bytes = await fs.readFile(file);
       return { bytes, mime: mimeOf(bytes) };
     } catch (e) {
@@ -1254,6 +1315,29 @@ export class TelegramIntegration {
             : photoInfo(message);
       if (!info) throw new Error("PHOTO_UNAVAILABLE");
       if (info.size > limit) throw new Error("PHOTO_TOO_LARGE");
+      if (fileOnly) {
+        await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+        const temporary = file + "." + randomUUID() + ".tmp";
+        try {
+          await fs.writeFile(temporary, "", { mode: 0o600, flag: "wx" });
+          // The SDK FileTarget writes chunks directly to disk instead of allocating
+          // a buffer the size of the whole video/document.
+          await this.client.downloadMedia(message, {
+            outputFile: temporary,
+            signal: AbortSignal.timeout(video ? 180000 : 60000),
+            progressCallback: (received, total) => {
+              if (Number(received) > limit || Number(total) > limit)
+                throw new Error("PHOTO_TOO_LARGE");
+            },
+          });
+          const result = await fileResult(temporary);
+          await fs.chmod(temporary, 0o600);
+          await fs.rename(temporary, file);
+          return { ...result, file };
+        } finally {
+          await fs.rm(temporary, { force: true });
+        }
+      }
       const bytes = await this.client.downloadMedia(message, {
         signal: AbortSignal.timeout(video ? 180000 : 60000),
         progressCallback: (received, total) => {
@@ -1528,9 +1612,7 @@ export class TelegramIntegration {
         .run(random, m.id);
       try {
         const target = m.replyToId
-          ? this.store
-              .messages(m.conversationId)
-              .find((x) => x.id === m.replyToId)?.externalId
+          ? this.store.message(m.conversationId, m.replyToId)?.externalId
           : undefined;
         const archive = this.store.db
           .prepare(
@@ -1706,7 +1788,11 @@ export class TelegramIntegration {
     this.nextRecoveryAt = null;
     clearTimeout(this.expiry);
     await this.client?.destroy();
-    await Promise.allSettled(this.photos.values());
+    await Promise.allSettled([
+      ...this.photos.values(),
+      ...this.fileRequests.values(),
+      ...this.richRequests.values(),
+    ]);
     await this.recovery?.catch(() => {});
     await this.background?.catch(() => {});
     await this.live.catch(() => {});

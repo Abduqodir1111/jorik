@@ -313,3 +313,97 @@ test("Telegram: a burst of photos queues instead of failing; duplicates share wo
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("Telegram mediaFile downloads videos/documents straight to a private file and reuses it offline", async () => {
+  for (const video of [true, "document"] as const) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jorik-file-stream-")),
+      db = openDb(dir, "real"),
+      store = new Store(db),
+      integration = new TelegramIntegration(store, {
+        apiId: 123,
+        apiHash: "test",
+        encryptionKey: "b".repeat(64),
+        attachmentDir: path.join(dir, "attachments"),
+      });
+    try {
+      db.prepare("INSERT INTO telegram_peers VALUES(?,?,?,?,?)").run(
+        "telegram-1",
+        "123",
+        "456",
+        "Synthetic",
+        "test",
+      );
+      const cid = randomUUID(),
+        mid = randomUUID();
+      db.prepare(
+        "INSERT INTO conversations(id,account_id,external_id,name,updated_at) VALUES(?,?,?,?,?)",
+      ).run(cid, "telegram-1", "123", "Synthetic", new Date().toISOString());
+      const bytes = Buffer.from(
+        video === true ? "0000ftypisom0000" : "%PDF-1.7\nSynthetic",
+      );
+      const sample = message();
+      sample.media = new Api.MessageMediaDocument({
+        document: new Api.Document({
+          id: bigInt(90),
+          accessHash: bigInt(80),
+          fileReference: Buffer.alloc(0),
+          date: 1,
+          mimeType: video === true ? "video/mp4" : "application/pdf",
+          size: bigInt(bytes.length),
+          dcId: 2,
+          attributes:
+            video === true
+              ? [
+                  new Api.DocumentAttributeVideo({
+                    duration: 3,
+                    w: 320,
+                    h: 240,
+                  }),
+                ]
+              : [new Api.DocumentAttributeFilename({ fileName: "Book.pdf" })],
+        }),
+      });
+      db.prepare(
+        "INSERT INTO messages(id,conversation_id,external_id,direction,text,status,created_at,attachments) VALUES(?,?,?,'in','','sent',?,?)",
+      ).run(
+        mid,
+        cid,
+        "70",
+        new Date().toISOString(),
+        JSON.stringify([{ kind: video === true ? "video" : "file" }]),
+      );
+      let downloads = 0;
+      integration.client = {
+        connected: true,
+        getMessages: async () => [sample],
+        downloadMedia: async (_m: any, params: any) => {
+          downloads++;
+          assert.equal(typeof params.outputFile, "string");
+          assert.equal(fs.statSync(params.outputFile).mode & 0o777, 0o600);
+          fs.writeFileSync(params.outputFile, bytes);
+          return params.outputFile;
+        },
+        destroy: async () => {},
+      } as unknown as TelegramClient;
+      Object.defineProperty(integration, "authenticated", { value: true });
+      const copies = await Promise.all(
+        Array.from({ length: 5 }, () => integration.mediaFile(mid, video)),
+      );
+      assert.equal(downloads, 1);
+      assert.ok(copies.every((c) => c.file === copies[0].file));
+      assert.equal(copies[0].size, bytes.length);
+      assert.equal(fs.statSync(copies[0].file).mode & 0o777, 0o600);
+      assert.equal("bytes" in copies[0], false);
+      integration.client = undefined;
+      assert.equal(
+        (await integration.mediaFile(mid, video)).file,
+        copies[0].file,
+      );
+      assert.equal(downloads, 1);
+    } finally {
+      await integration.close();
+      db.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});

@@ -56,6 +56,22 @@ const decode = (r: Row): Order => ({
 });
 export function registerOrders(app: FastifyInstance, store: Store) {
   const db = store.db;
+  const checkVersion = (
+    order: Order,
+    expected: string | string[] | undefined,
+  ) => {
+    if (expected !== undefined && expected !== JSON.stringify(order.updatedAt))
+      throw Object.assign(
+        new Error(
+          "Заказ уже изменён другим продавцом. Скопируйте свои правки, закройте форму и откройте заказ заново.",
+        ),
+        { statusCode: 409 },
+      );
+  };
+  const nextVersion = (order: Order) =>
+    new Date(
+      Math.max(Date.now(), Date.parse(order.updatedAt) + 1),
+    ).toISOString();
   const get = (id: string) => {
     const r = db.prepare("SELECT * FROM orders WHERE id=?").get(id) as
       Row | undefined;
@@ -149,14 +165,16 @@ export function registerOrders(app: FastifyInstance, store: Store) {
     return get(id);
   });
   app.put<{ Params: { id: string } }>("/api/orders/:id", async (req) => {
-    const o = validate(req.body, get(req.params.id));
+    const existing = get(req.params.id);
+    checkVersion(existing, req.headers["if-match"]);
+    const o = validate(req.body, existing);
     db.prepare(
       "UPDATE orders SET date=?,phone=?,data=?,updated_at=? WHERE id=?",
     ).run(
       o.date,
       o.phone,
       JSON.stringify(o),
-      new Date().toISOString(),
+      nextVersion(existing),
       req.params.id,
     );
     store.ordersChanged();
@@ -165,14 +183,15 @@ export function registerOrders(app: FastifyInstance, store: Store) {
   app.patch<{ Params: { id: string } }>(
     "/api/orders/:id/refused",
     async (req) => {
-      get(req.params.id);
+      const existing = get(req.params.id);
+      checkVersion(existing, req.headers["if-match"]);
       const { refused } = z
         .object({ refused: z.boolean() })
         .strict()
         .parse(req.body);
       db.prepare("UPDATE orders SET refused=?,updated_at=? WHERE id=?").run(
         refused ? 1 : 0,
-        new Date().toISOString(),
+        nextVersion(existing),
         req.params.id,
       );
       store.ordersChanged();
@@ -180,7 +199,7 @@ export function registerOrders(app: FastifyInstance, store: Store) {
     },
   );
   app.delete<{ Params: { id: string } }>("/api/orders/:id", async (req) => {
-    get(req.params.id);
+    checkVersion(get(req.params.id), req.headers["if-match"]);
     db.prepare("DELETE FROM orders WHERE id=?").run(req.params.id);
     store.ordersChanged();
     return { ok: true };

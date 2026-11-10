@@ -1172,9 +1172,7 @@ export class InstagramIntegration {
     send: async (a, m) => {
       this.adapter.validateReply(a, m);
       const target = m.replyToId
-        ? this.store
-            .messages(m.conversationId)
-            .find((x) => x.id === m.replyToId)
+        ? this.store.message(m.conversationId, m.replyToId)
         : undefined;
       const quotedText = target
         ? `↪ ${target.text.slice(0, 160)}\n\n${m.text}`

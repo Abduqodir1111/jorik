@@ -18,6 +18,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { ServerResponse } from "node:http";
+import { sendEvent } from "./event-stream.js";
 import { openDb } from "./db.js";
 import { Store } from "./store.js";
 import { checkPassword, hashToken } from "./auth.js";
@@ -95,11 +96,12 @@ export async function createApp(opts: {
     if (publishTimer || !clients.size) return;
     publishTimer = setTimeout(() => {
       publishTimer = undefined;
-      for (const c of clients) c.write("data: changed\n\n");
+      for (const c of clients) sendEvent(clients, c, "data: changed\n\n");
     }, 40);
   };
   const store = new Store(db, publish, (event) => {
-    for (const c of clients) c.write("event: incoming\ndata: new\n\n");
+    for (const c of clients)
+      sendEvent(clients, c, "event: incoming\ndata: new\n\n");
     if (event) {
       try {
         push.enqueue(event);
@@ -110,17 +112,19 @@ export async function createApp(opts: {
   });
   store.ordersChanged = () => {
     for (const client of clients)
-      client.write("event: orders-changed\ndata: changed\n\n");
+      sendEvent(clients, client, "event: orders-changed\ndata: changed\n\n");
   };
   store.messageDeleted = (id, conversationId) => {
     for (const client of clients)
-      client.write(
+      sendEvent(
+        clients,
+        client,
         `event: message-deleted\ndata: ${JSON.stringify({ id, conversationId, preview: store.conversation(conversationId).preview })}\n\n`,
       );
   };
   store.messageUpdated = (message) => {
     const payload = `event: message-update\ndata: ${JSON.stringify(message)}\n\n`;
-    for (const client of clients) client.write(payload);
+    for (const client of clients) sendEvent(clients, client, payload);
   };
   const telegrams = new Map<string, TelegramIntegration>();
   if (opts.mode === "real" && opts.telegram) {
@@ -496,6 +500,7 @@ export async function createApp(opts: {
 
   app.get<{ Params: { id: string }; Querystring: { download?: string } }>(
     "/api/telegram/documents/:id",
+    { compress: false },
     async (req, reply) => {
       const row = db
         .prepare(
@@ -510,7 +515,7 @@ export async function createApp(opts: {
         );
       if (!row || !attachment)
         return reply.code(404).send({ error: "Документ не найден" });
-      const { bytes, mime } = await tg(row.account_id).photo(
+      const { file, mime } = await tg(row.account_id).mediaFile(
         req.params.id,
         "document",
       );
@@ -526,12 +531,17 @@ export async function createApp(opts: {
           `${mime === "application/pdf" && req.query.download !== "1" ? "inline" : "attachment"}; filename*=UTF-8''${filename}`,
         )
         .header("Cache-Control", "private, max-age=3600")
-        .send(bytes);
+        .sendFile(path.basename(file), path.dirname(file), {
+          cacheControl: false,
+          acceptRanges: true,
+          contentType: false,
+        });
     },
   );
 
   app.get<{ Params: { id: string } }>(
     "/api/telegram/videos/:id",
+    { compress: false },
     async (req, reply) => {
       const row = db
         .prepare(
@@ -539,40 +549,18 @@ export async function createApp(opts: {
         )
         .get(req.params.id) as { account_id: string } | undefined;
       if (!row) return reply.code(404).send({ error: "Видео не найдено" });
-      const { bytes, mime } = await tg(row.account_id).photo(
+      const { file, mime } = await tg(row.account_id).mediaFile(
         req.params.id,
         true,
       );
-      reply
+      return reply
         .type(mime)
         .header("Content-Disposition", "inline")
-        .header("Accept-Ranges", "bytes");
-      const range = req.headers.range;
-      if (!range) return reply.send(bytes);
-      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-      const start = match?.[1]
-        ? Number(match[1])
-        : Math.max(0, bytes.length - Number(match?.[2]));
-      const end =
-        match?.[1] && match[2]
-          ? Math.min(Number(match[2]), bytes.length - 1)
-          : bytes.length - 1;
-      if (
-        !match ||
-        (!match[1] && !match[2]) ||
-        !Number.isSafeInteger(start) ||
-        !Number.isSafeInteger(end) ||
-        start > end ||
-        start >= bytes.length
-      )
-        return reply
-          .code(416)
-          .header("Content-Range", `bytes */${bytes.length}`)
-          .send();
-      return reply
-        .code(206)
-        .header("Content-Range", `bytes ${start}-${end}/${bytes.length}`)
-        .send(bytes.subarray(start, end + 1));
+        .sendFile(path.basename(file), path.dirname(file), {
+          cacheControl: false,
+          acceptRanges: true,
+          contentType: false,
+        });
     },
   );
   app.get<{ Params: { id: string; index: string } }>(
@@ -637,6 +625,13 @@ export async function createApp(opts: {
     },
   );
   app.get("/api/state", async () => ({
+    quickRepliesVersion: hashToken(
+      (
+        db
+          .prepare("SELECT value FROM settings WHERE key='quickReplies'")
+          .get() as { value: string } | undefined
+      )?.value ?? "[]",
+    ),
     mode: opts.mode,
     localAccess: !!opts.localAccess,
     accounts: store.accounts().map((a) =>
@@ -721,15 +716,42 @@ export async function createApp(opts: {
     "/api/conversations/:id/read",
     async (req) => {
       const conv = store.conversation(req.params.id);
-      const { unread } = z.object({ unread: z.boolean() }).parse(req.body);
+      const { unread, throughId } = z
+        .object({
+          unread: z.boolean(),
+          throughId: z.string().uuid().optional(),
+        })
+        .parse(req.body);
+      let remaining = 0;
+      if (!unread && throughId) {
+        const boundary = db
+          .prepare(
+            "SELECT created_at,rowid FROM messages WHERE id=? AND conversation_id=? AND direction='in' AND deleted_at IS NULL",
+          )
+          .get(throughId, conv.id) as
+          { created_at: string; rowid: number } | undefined;
+        if (!boundary) throw new Error("Сообщение для прочтения не найдено");
+        const after = db
+          .prepare(
+            "SELECT count(*) AS count FROM messages WHERE conversation_id=? AND direction='in' AND deleted_at IS NULL AND (created_at>? OR (created_at=? AND rowid>?))",
+          )
+          .get(
+            conv.id,
+            boundary.created_at,
+            boundary.created_at,
+            boundary.rowid,
+          ) as { count: number };
+        remaining = Math.min(conv.unread, after.count);
+      }
       db.prepare("UPDATE conversations SET unread=? WHERE id=?").run(
-        unread ? 1 : 0,
+        unread ? Math.max(1, conv.unread) : remaining,
         req.params.id,
       );
       publish();
       const account = store.account(conv.accountId);
       if (
         !unread &&
+        remaining === 0 &&
         account.mode === "real" &&
         account.adapter === "instagram-graph"
       ) {
@@ -775,6 +797,22 @@ export async function createApp(opts: {
     },
   );
   app.put("/api/quick-replies", { bodyLimit: 3 * 1024 * 1024 }, async (req) => {
+    const current =
+      (
+        db
+          .prepare("SELECT value FROM settings WHERE key='quickReplies'")
+          .get() as { value: string } | undefined
+      )?.value ?? "[]";
+    if (
+      req.headers["if-match"] !== undefined &&
+      req.headers["if-match"] !== JSON.stringify(hashToken(current))
+    )
+      throw Object.assign(
+        new Error(
+          "Шаблоны изменены другим продавцом. Скопируйте свои правки и обновите страницу.",
+        ),
+        { statusCode: 409 },
+      );
     const slots = z
       .array(
         z
@@ -795,7 +833,7 @@ export async function createApp(opts: {
       "INSERT INTO settings VALUES('quickReplies',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
     ).run(JSON.stringify(slots));
     publish();
-    return { ok: true };
+    return { ok: true, version: hashToken(JSON.stringify(slots)) };
   });
   app.post<{ Params: { id: string } }>(
     "/api/conversations/:id/uploads",
@@ -917,12 +955,13 @@ export async function createApp(opts: {
   );
   app.get("/api/events", { compress: false }, async (req, reply) => {
     reply.hijack();
-    const renewedCookie = reply.getHeader("set-cookie");
-    if (renewedCookie) reply.raw.setHeader("Set-Cookie", renewedCookie);
+    for (const [name, value] of Object.entries(reply.getHeaders()))
+      if (value !== undefined) reply.raw.setHeader(name, value);
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     });
     reply.raw.write("data: connected\n\n");
     clients.add(reply.raw);
@@ -931,7 +970,7 @@ export async function createApp(opts: {
         .prepare("SELECT 1 FROM sessions WHERE token_hash=? AND expires_at>?")
         .get(hashToken(req.cookies.session ?? ""), Date.now());
       if (!opts.localAccess && !valid) reply.raw.end();
-      else reply.raw.write(": heartbeat\n\n");
+      else sendEvent(clients, reply.raw, ": heartbeat\n\n");
     }, 15000);
     req.raw.on("close", () => {
       clearInterval(timer);
@@ -969,7 +1008,11 @@ export async function createApp(opts: {
   const timer =
     opts.worker === false
       ? undefined
-      : setInterval(() => void store.tick(), 500);
+      : setInterval(() => {
+          void store
+            .tick()
+            .catch(() => console.warn("Message queue tick failed"));
+        }, 500);
   const pushTimer =
     opts.worker === false
       ? undefined

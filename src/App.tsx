@@ -8,6 +8,7 @@ const Orders = lazy(() => import("./Orders"));
 import { useNotificationSound } from "./NotificationSound";
 import { useOperator } from "./OperatorContext";
 import { ChatCache } from "./chat-cache";
+import { reconcileList } from "./reconcile-list";
 import PlatformIcon from "./PlatformIcon";
 import AccountName from "./AccountName";
 import { recentConversations } from "../shared/inbox";
@@ -316,9 +317,9 @@ export default function App() {
       chatCache.current = new ChatCache(s.mode, storage);
       cacheMode.current = s.mode;
     }
-    hydrate(s.settings.quickReplies);
-    setAccounts(s.accounts);
-    setConversations(s.conversations);
+    hydrate(s.settings.quickReplies, s.quickRepliesVersion);
+    setAccounts((old) => reconcileList(old, s.accounts));
+    setConversations((old) => reconcileList(old, s.conversations));
     setMode(s.mode);
     setLocalAccess(!!s.localAccess);
     setOwnerName(s.settings.ownerName ?? "Владелец");
@@ -494,19 +495,24 @@ export default function App() {
       active = false;
     };
   }, [selected]);
+  const visibleIncomingId = messages
+    .filter((m) => m.direction === "in" && m.conversationId === selected)
+    .at(-1)?.id;
   useEffect(() => {
-    if (!selected || page !== "inbox" || historyLoading) return;
+    if (!selected || page !== "inbox" || historyLoading || !visibleIncomingId)
+      return;
     const markVisibleRead = () => {
       if (document.visibilityState !== "visible") return;
-      api(`/conversations/${selected}/read`, "POST", { unread: false }).catch(
-        report,
-      );
+      api(`/conversations/${selected}/read`, "POST", {
+        unread: false,
+        throughId: visibleIncomingId,
+      }).catch(report);
     };
     markVisibleRead();
     document.addEventListener("visibilitychange", markVisibleRead);
     return () =>
       document.removeEventListener("visibilitychange", markVisibleRead);
-  }, [selected, page, historyLoading]);
+  }, [selected, page, historyLoading, visibleIncomingId]);
   useLayoutEffect(() => {
     followLatest.current = true;
     chatScrollTop.current = 0;
