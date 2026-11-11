@@ -1,3 +1,5 @@
+import { useSwipeReply } from "./useSwipeReply";
+import { canSwipeReply } from "./swipe-reply-gesture";
 import VoicePlayer from "./VoicePlayer";
 import LocationCard from "./LocationCard";
 import StickerRenderer from "./StickerRenderer";
@@ -12,7 +14,7 @@ import React, {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { AlertCircle, Clock, Check, CheckCheck, X } from "lucide-react";
+import { AlertCircle, Clock, Check, CheckCheck, X, Reply } from "lucide-react";
 import type { Account, Message } from "../shared/types";
 import Photo from "./Photo";
 import Video from "./Video";
@@ -56,6 +58,11 @@ export default memo(function MessageTimeline({
     if (longPress.current) clearTimeout(longPress.current);
     longPress.current = null;
   };
+  const swipe = useSwipeReply(messages, onReply, () => {
+    cancelPress();
+    suppressClick.current = true;
+    closeContext();
+  });
   useEffect(() => () => cancelPress(), []);
   const activeMessage = context
     ? messages.find((m) => m.id === context.id)
@@ -85,18 +92,35 @@ export default memo(function MessageTimeline({
               tabIndex={m.archiveJob && m.archiveJob.state !== "sent" ? -1 : 0}
               onPointerDown={(e) => {
                 suppressClick.current = false;
+                if (e.pointerType === "touch" && !e.isPrimary) {
+                  cancelPress();
+                  swipe.cancel();
+                  return;
+                }
+                swipe.start(e, m);
                 if (m.archiveJob && m.archiveJob.state !== "sent") return;
                 if (e.pointerType !== "touch") return;
                 cancelPress();
                 origin.current = { x: e.clientX, y: e.clientY };
                 const { clientX: x, clientY: y } = e;
                 longPress.current = setTimeout(() => {
+                  swipe.cancel();
                   suppressClick.current = true;
                   setContext({ id: m.id, x, y });
                 }, 500);
               }}
-              onPointerUp={cancelPress}
-              onPointerCancel={cancelPress}
+              onPointerUp={(e) => {
+                cancelPress();
+                swipe.end(e);
+              }}
+              onPointerCancel={() => {
+                cancelPress();
+                swipe.cancel();
+              }}
+              onLostPointerCapture={(e) => {
+                if (e.target === e.currentTarget && swipe.active())
+                  swipe.cancel();
+              }}
               onPointerMove={(e) => {
                 if (
                   Math.hypot(
@@ -105,6 +129,7 @@ export default memo(function MessageTimeline({
                   ) > 8
                 )
                   cancelPress();
+                swipe.move(e);
               }}
               onClickCapture={(e) => {
                 if (suppressClick.current) {
@@ -115,6 +140,8 @@ export default memo(function MessageTimeline({
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
+                if (swipe.active()) return;
+                swipe.cancel();
                 if (m.archiveJob && m.archiveJob.state !== "sent") return;
                 cancelPress();
                 setContext({ id: m.id, x: e.clientX, y: e.clientY });
@@ -132,6 +159,7 @@ export default memo(function MessageTimeline({
               }}
               className={
                 "bubble " +
+                (canSwipeReply(m) ? "swipe-reply-enabled " : "") +
                 (m.attachments.some((a) => a.kind === "sticker")
                   ? "sticker-bubble "
                   : "") +
@@ -143,6 +171,9 @@ export default memo(function MessageTimeline({
                 (m.status === "error" || m.status === "unknown" ? "failed" : "")
               }
             >
+              <span className="swipe-reply-indicator" aria-hidden="true">
+                <Reply size={18} />
+              </span>
               {(m.reply_to || m.replyToId) && (
                 <blockquote
                   className="message-quote"

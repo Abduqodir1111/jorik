@@ -45,6 +45,7 @@ export interface Conversation {
   draft: string;
 }
 export interface Attachment {
+  address?: string;
   latitude?: number;
   longitude?: number;
   duration?: number;

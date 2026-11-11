@@ -25,6 +25,9 @@ export function richMedia(m: Api.Message): Attachment | undefined {
       mime: "application/geo+json",
       size: 0,
       name: media instanceof Api.MessageMediaVenue ? media.title : "Геолокация",
+      ...(media instanceof Api.MessageMediaVenue && media.address?.trim()
+        ? { address: media.address.trim() }
+        : {}),
     };
   }
   if (

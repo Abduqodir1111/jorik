@@ -1,0 +1,50 @@
+@media (max-width: 767px) {
+  .bubble.swipe-reply-enabled {
+    touch-action: pan-y pinch-zoom;
+  }
+  .message-row.is-swiping-reply {
+    overflow-x: clip;
+  }
+  .bubble[data-reply-dragging],
+  .bubble[data-reply-settling] {
+    position: relative;
+    transform: translateX(var(--reply-swipe-x, 0px));
+    will-change: transform;
+  }
+  .bubble[data-reply-dragging] {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .bubble[data-reply-settling] {
+    transition: transform 180ms ease-out;
+  }
+  .bubble[data-reply-dragging] > .swipe-reply-indicator,
+  .bubble[data-reply-settling] > .swipe-reply-indicator {
+    display: flex;
+    position: absolute;
+    right: -36px;
+    top: 50%;
+    width: 28px;
+    height: 28px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--surface, #fff);
+    color: var(--muted, #64748b);
+    transform: translateY(-50%);
+    opacity: var(--reply-swipe-progress, 0);
+    pointer-events: none;
+  }
+  .bubble[data-reply-ready] > .swipe-reply-indicator {
+    color: #2563eb;
+    background: #dbeafe;
+  }
+}
+.swipe-reply-indicator {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bubble[data-reply-settling] {
+    transition: none;
+  }
+}

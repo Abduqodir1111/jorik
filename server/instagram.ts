@@ -833,6 +833,10 @@ export class InstagramIntegration {
                                 latitude: a.payload?.coordinates?.lat,
                                 longitude: a.payload?.coordinates?.long,
                                 name: a.title,
+                                address:
+                                  typeof a.address === "string"
+                                    ? a.address
+                                    : a.payload?.address,
                               },
                             }
                           : a.type === "audio" || a.type === "voice_media"

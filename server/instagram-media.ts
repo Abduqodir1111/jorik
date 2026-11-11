@@ -1,6 +1,11 @@
 import type { Attachment } from "../shared/types.js";
 export type InstagramMedia = {
-  location_data?: { latitude?: number; longitude?: number; name?: string };
+  location_data?: {
+    latitude?: number;
+    longitude?: number;
+    name?: string;
+    address?: string;
+  };
   mime_type?: string;
   file_url?: string;
   audio_data?: { url?: string };
@@ -82,7 +87,13 @@ export function instagramAttachments(
         latitude: loc.latitude,
         longitude: loc.longitude,
         url: "",
-        name: loc.name || "Геолокация",
+        name:
+          typeof loc.name === "string" && loc.name.trim()
+            ? loc.name
+            : "Геолокация",
+        ...(typeof loc.address === "string" && loc.address.trim()
+          ? { address: loc.address.trim() }
+          : {}),
         mime: "application/geo+json",
         size: 0,
       });

@@ -268,3 +268,6 @@
 .message-context-reactions button{padding:7px;border-radius:9px;font-size:22px}.message-context-reactions button[aria-pressed=true]{background:#3b82f630}
 .inbox-page .chat-header .mark-unread{margin-left:auto}
 .bubble{-webkit-touch-callout:none}
+
+.location-card > span { min-width: 0; overflow-wrap: anywhere; }
+.location-card > svg { flex-shrink: 0; }

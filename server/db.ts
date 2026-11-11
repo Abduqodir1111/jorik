@@ -22,7 +22,7 @@ export function openDb(dataDir: string, mode: Mode) {
   db.exec("CREATE TABLE IF NOT EXISTS migrations(name TEXT PRIMARY KEY)");
   for (const name of fs
     .readdirSync(path.resolve("migrations"))
-    .filter((n) => n.endsWith(".sql"))
+    .filter((n) => /^\d{3}_[a-z0-9_]+\.sql$/i.test(n))
     .sort()) {
     if (!db.prepare("SELECT 1 FROM migrations WHERE name=?").get(name))
       db.transaction(() => {
