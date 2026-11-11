@@ -44,8 +44,16 @@ with tarfile.open(args.base) as source:
     with tempfile.TemporaryFile() as patch:
         with tarfile.open(fileobj=patch, mode="w") as layer:
             for directory in ("dist", "dist-server", "migrations"):
+                # Hide old generated files, including AppleDouble metadata, in
+                # lower image layers before adding this complete replacement.
+                opaque = tarfile.TarInfo("app/" + directory + "/.wh..wh..opq")
+                opaque.mode = 0o644
+                layer.addfile(opaque)
                 for path in sorted(pathlib.Path(directory).rglob("*")):
-                    if path.is_file():
+                    if path.is_file() and not any(
+                        part.startswith("._") or part == ".DS_Store"
+                        for part in path.parts
+                    ):
                         info = layer.gettarinfo(str(path), "app/" + str(path))
                         info.uid = info.gid = 1000
                         info.uname = info.gname = "node"
