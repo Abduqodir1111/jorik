@@ -18,3 +18,4 @@ import "./unified.css";
 import "./order-form.css";
 
 import "./chat-workspace.css";
+import "./typography.css";

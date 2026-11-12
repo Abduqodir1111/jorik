@@ -24,7 +24,7 @@
   overflow-wrap: anywhere;
 }
 .video-send-heading span:not(.video-send-icon) {
-  font-size: 12px;
+  font-size: var(--font-body);
   opacity: 0.9;
 }
 .video-send-icon {
@@ -59,7 +59,7 @@
 }
 .video-send-progress small {
   color: inherit;
-  font-size: 11px;
+  font-size: var(--font-small);
   line-height: 1.5;
   opacity: 0.9;
   overflow-wrap: anywhere;
@@ -67,7 +67,7 @@
 .video-send-steps {
   display: flex;
   gap: 12px;
-  font-size: 10px;
+  font-size: var(--font-caption);
   opacity: 0.8;
 }
 .video-send-steps span {

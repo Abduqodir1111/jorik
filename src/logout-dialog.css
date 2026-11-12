@@ -57,7 +57,7 @@
   border-radius: 10px;
   background: var(--hover);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-body);
   line-height: 1.5;
 }
 .logout-card footer {

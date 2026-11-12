@@ -23,7 +23,7 @@
   margin: 3px 0 0;
 }
 .compact-order-form .eyebrow {
-  font-size: 9px;
+  font-size: var(--font-caption);
 }
 .sheet-handle {
   display: none;
@@ -33,7 +33,7 @@
   display: block;
   min-width: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-small);
   line-height: 1.4;
 }
 .compact-order-form label > input,
@@ -50,7 +50,7 @@
   height: 36px;
   min-height: 36px;
   padding: 7px 8px;
-  font-size: 12px;
+  font-size: var(--font-body);
   border-radius: 7px;
 }
 .compact-grid {
@@ -76,14 +76,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--ink);
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 12px;
+  font-family:var(--font-ui);
+  font-size: var(--font-body);
   white-space: nowrap;
 }
 .order-identity > .store-badge {
   margin-left: auto;
   max-width: 43%;
-  font-size: 9px;
+  font-size: var(--font-caption);
 }
 .identity-platform {
   display: grid;
@@ -109,7 +109,7 @@
 }
 .identity-unknown {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-small);
 }
 .order-date-type {
   grid-template-columns: 46% 1fr;
@@ -130,7 +130,7 @@
 .type-segments button {
   flex: 1;
   padding: 3px 5px;
-  font-size: 11px;
+  font-size: var(--font-small);
   color: var(--muted);
   border-radius: 5px;
   white-space: nowrap;
@@ -152,7 +152,7 @@
 .compact-order-form .compact-phone > span {
   padding: 0;
   color: var(--ink);
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 .compact-order-drawer .compact-order-form .compact-phone input {
   margin: 0;
@@ -168,7 +168,7 @@
 }
 .compact-order-form .orders-error {
   margin: 0;
-  font-size: 10px;
+  font-size: var(--font-caption);
 }
 .repeat-customer {
   padding: 7px 9px;
@@ -182,7 +182,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 5px;
-  font-size: 10px;
+  font-size: var(--font-caption);
 }
 .repeat-heading > span {
   display: flex;
@@ -196,14 +196,14 @@
   align-items: center;
   padding: 3px 0;
   color: #047857;
-  font-size: 10px;
+  font-size: var(--font-caption);
   font-weight: 650;
 }
 .repeat-last {
   display: flex;
   gap: 6px;
   justify-content: space-between;
-  font-size: 10px;
+  font-size: var(--font-caption);
   padding-top: 4px;
 }
 .repeat-last > span {
@@ -218,7 +218,7 @@
 .all-order-history {
   padding: 3px 0 0;
   color: #047857;
-  font-size: 9px;
+  font-size: var(--font-caption);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -263,7 +263,7 @@
   color: var(--muted);
 }
 .clipboard-notice {
-  font-size: 10px;
+  font-size: var(--font-caption);
 }
 .compact-money-row {
   display: flex;
@@ -290,7 +290,7 @@
   font-variant-numeric: tabular-nums;
 }
 .compact-amount > span {
-  font-size: 11px;
+  font-size: var(--font-small);
   padding-right: 9px;
 }
 .compact-money-row .payment-toggle {
@@ -303,7 +303,7 @@
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--hover);
-  font-size: 11px;
+  font-size: var(--font-small);
   color: var(--ink);
 }
 .compact-money-row .payment-toggle.paid {
@@ -322,7 +322,7 @@
   min-height: 50px;
   max-height: 124px;
   padding: 7px 9px;
-  font-size: 12px;
+  font-size: var(--font-body);
   line-height: 18px;
   border-radius: 7px;
   overflow: auto;
@@ -341,11 +341,11 @@
   gap: 4px;
   min-height: 36px;
   padding: 8px;
-  font-size: 11px;
+  font-size: var(--font-small);
   flex-wrap: wrap;
 }
 .compact-order-form footer > button:first-child {
-  font-size: 12px;
+  font-size: var(--font-body);
   padding: 8px 5px;
 }
 .compact-order-form .manual-identity {
@@ -406,20 +406,20 @@
     font-size: 16px;
   }
   .compact-order-form footer .primary {
-    font-size: 11px;
+    font-size: var(--font-small);
   }
   .compact-order-drawer .compact-order-form > footer {
     bottom: -10px;
     padding: 8px 0;
   }
   .order-identity > a {
-    font-size: 11px;
+    font-size: var(--font-small);
   }
   .repeat-heading {
-    font-size: 9px;
+    font-size: var(--font-caption);
   }
   .repeat-heading button {
-    font-size: 9px;
+    font-size: var(--font-caption);
   }
 }
 
@@ -428,14 +428,14 @@
 .compact-order-drawer .compact-order-form { padding:16px 20px; gap:14px; }
 .compact-order-drawer .compact-order-form > header { margin:-16px -20px 0; top:-16px; padding:16px 20px 10px; border-bottom:0; }
 .compact-order-form header h2 { font-size:19px; }
-.compact-order-form .eyebrow { color:#0369a1; font-size:11px; font-weight:700; }
-.compact-order-form label,.compact-field { font-size:12px; font-weight:600; color:var(--ink); }
+.compact-order-form .eyebrow { color:#0369a1; font-size:var(--font-small); font-weight:700; }
+.compact-order-form label,.compact-field { font-size:var(--font-body); font-weight:600; color:var(--ink); }
 .compact-order-form .compact-grid { grid-template-columns:1fr 1fr; gap:12px; }
 .compact-order-form .order-identity { min-height:38px; padding:0 10px; border:1px solid var(--line); border-radius:12px; }
 .compact-order-form .order-identity > a { font-weight:700; }
 .compact-order-drawer .compact-order-form input:not([type="checkbox"]):not([type="radio"]),.compact-order-drawer .compact-order-form select { height:38px; min-height:38px; border-radius:12px; }
 .compact-order-form .type-segments,.compact-order-form .compact-phone { height:38px; border-radius:12px; }
-.compact-order-form .compact-phone { font-family:ui-monospace,SFMono-Regular,monospace; }
+.compact-order-form .compact-phone { font-family:var(--font-ui); }
 .compact-order-form .type-segments button { border-radius:8px; font-weight:600; }
 .compact-order-form .compact-delivery { gap:14px; }
 .compact-order-form .location-input,.compact-order-form .compact-amount { height:38px; border-radius:12px; }
@@ -470,9 +470,9 @@
   width: 100%;
   padding: 3px 4px;
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-body);
   line-height: 1.2;
 }
-.compact-order-form .add-phone { justify-self:start; padding:0; color:var(--accent); font-size:12px; }
+.compact-order-form .add-phone { justify-self:start; padding:0; color:var(--accent); font-size:var(--font-body); }
 .optional-phone-field { position:relative; padding-right:30px; min-width:0; }
 .optional-phone-remove { position:absolute; right:0; top:24px; padding:5px; color:var(--muted); }

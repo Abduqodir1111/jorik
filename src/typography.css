@@ -1,0 +1,36 @@
+:root.dark {
+  --preview-ink: #b6c2d3;
+}
+/* Shared reading sizes; keep mobile form controls at 16px to avoid iOS zoom. */
+.app {
+  font-size: var(--font-body);
+  line-height: 1.4;
+}
+.inbox-page .bubble .message-meta {
+  font-size: var(--font-caption);
+}
+.conversation .contact-line > b {
+  font-size: 14px;
+  font-weight: 600;
+}
+.conversation .preview {
+  font-size: 13px;
+  line-height: 1.4;
+}
+.conversation .preview > span {
+  color: var(--preview-ink);
+}
+.conversation.is-unread .preview > span {
+  color: var(--ink);
+}
+.bubble,
+.bubble p {
+  font-size: var(--message-font-size, 15px);
+  line-height: 1.35;
+}
+@media (min-width: 768px) {
+  .inbox-page .composer textarea {
+    font-size: 15px;
+    line-height: 1.35;
+  }
+}

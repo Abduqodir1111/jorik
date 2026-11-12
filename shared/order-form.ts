@@ -1,4 +1,13 @@
 import type { Order } from "./orders.js";
+import { localDate } from "./orders.js";
+
+/** Local delivery calendar: weekdays +1, Saturday -> Monday, Sunday -> Tuesday. */
+export function nextDeliveryDate(now = new Date()) {
+  const next = new Date(now.getTime());
+  const day = next.getDay();
+  next.setDate(next.getDate() + (day === 6 || day === 0 ? 2 : 1));
+  return localDate(next);
+}
 
 /** Accept a national number or a pasted full Uzbek number; persist digits only. */
 export function uzPhoneDigits(value: string) {

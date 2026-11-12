@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   customerOrderHistory,
+  nextDeliveryDate,
   nationalPhoneMask,
   phoneCaret,
   recentDeliveryAddress,
@@ -88,4 +89,59 @@ test("Address suggestion skips pickup/refused/incomplete entries and preserves a
     recentDeliveryAddress([order("empty", { address: "", coordinates: "" })]),
     undefined,
   );
+});
+
+test("New order delivery dates use the local weekday calendar, including Sunday -> Tuesday", () => {
+  const previousTZ = process.env.TZ;
+  try {
+    for (const tz of [
+      "Asia/Tashkent",
+      "America/Los_Angeles",
+      "Pacific/Kiritimati",
+    ]) {
+      process.env.TZ = tz;
+      for (const [today, expected] of [
+        ["2026-11-09", "2026-11-10"],
+        ["2026-11-10", "2026-11-11"],
+        ["2026-11-11", "2026-11-12"],
+        ["2026-11-12", "2026-11-13"],
+        ["2026-11-13", "2026-11-14"],
+        ["2026-11-14", "2026-11-16"],
+        ["2026-11-15", "2026-11-17"],
+        ["2026-02-28", "2026-03-02"],
+        ["2026-12-31", "2027-01-01"],
+        ["2028-02-28", "2028-02-29"],
+      ]) {
+        for (const time of ["00:05:00", "23:55:00"]) {
+          const now = new Date(today + "T" + time);
+          const original = now.getTime();
+          assert.equal(
+            nextDeliveryDate(now),
+            expected,
+            `${tz} ${today} ${time}`,
+          );
+          assert.equal(
+            now.getTime(),
+            original,
+            "Caller date must not be mutated",
+          );
+        }
+      }
+    }
+    for (const [tz, today, expected] of [
+      ["America/Los_Angeles", "2026-03-07T23:55:00", "2026-03-09"],
+      ["America/Los_Angeles", "2026-11-01T00:05:00", "2026-11-03"],
+      ["Australia/Sydney", "2026-10-03T23:55:00", "2026-10-05"],
+    ]) {
+      process.env.TZ = tz;
+      assert.equal(
+        nextDeliveryDate(new Date(today)),
+        expected,
+        "DST keeps the local calendar date",
+      );
+    }
+  } finally {
+    if (previousTZ === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTZ;
+  }
 });

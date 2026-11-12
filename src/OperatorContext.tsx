@@ -30,9 +30,9 @@ export function OperatorProvider({ children }: { children: ReactNode }) {
   const [fontSize, setFontSize] = useState(() => {
     try {
       const size = Number(localStorage.getItem("jorik-font-size"));
-      return [14, 16, 18].includes(size) ? size : 16;
+      return [14, 15, 18].includes(size) ? size : 15;
     } catch {
-      return 16;
+      return 15;
     }
   });
   useEffect(() => {

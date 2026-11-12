@@ -17,22 +17,22 @@
 .inbox-page .conversation { min-height:76px; padding:12px; }
 .conversation-avatar,.conversation-avatar .avatar { width:40px; height:40px; }
 .contact-line { flex-wrap:nowrap; min-width:0; }
-.contact-line .store-badge { font-size:9px; padding:1px 4px; }
-.contact-line > b { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
-.conversation .preview { font-size:11px; }
+.contact-line .store-badge { font-size:var(--font-caption); padding:1px 4px; }
+.contact-line > b { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--font-body); }
+.conversation .preview { font-size:var(--font-small); }
 .workspace-platform { display:grid; place-items:center; width:28px; height:28px; flex-shrink:0; border-radius:50%; color:white; }
 .workspace-platform.telegram { background:#229ed9; }
 .workspace-platform.instagram { background:linear-gradient(45deg,#f58529,#dd2a7b,#8134af); }
 .workspace-platform .platform-icon { width:19px; height:19px; }
 .workspace-contact { min-width:0; flex:1; }
 .workspace-contact-title { display:flex; align-items:center; gap:7px; min-width:0; }
-.workspace-contact-title h2 { font-family:ui-monospace,SFMono-Regular,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.workspace-contact-title .store-badge { font-size:9px; }
+.workspace-contact-title h2 { font-family:var(--font-ui); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workspace-contact-title .store-badge { font-size:var(--font-caption); }
 .inbox-page .chat-header { min-height:64px; height:auto; padding:9px 16px; }
-.chat-header .create-order { border-radius:12px; background:var(--hover); color:var(--ink); white-space:nowrap; font-size:11px; }
+.chat-header .create-order { border-radius:12px; background:var(--hover); color:var(--ink); white-space:nowrap; font-size:var(--font-small); }
 .chat-header .create-order[aria-pressed=true] { color:#fff; background:#2563eb; }
 .chat-header .create-order:hover { color:#fff; }
-.meta-reply-window { display:inline-block; margin-left:8px; color:#92400e; background:#fffbeb; border:1px solid #fde68a; padding:2px 6px; border-radius:99px; font-size:9px; line-height:1.4; }
+.meta-reply-window { display:inline-block; margin-left:8px; color:#92400e; background:#fffbeb; border:1px solid #fde68a; padding:2px 6px; border-radius:99px; font-size:var(--font-caption); line-height:1.4; }
 .meta-reply-window.closed { color:#be123c; background:#fff1f2; border-color:#fecdd3; }
 .dark .meta-reply-window { background:#78350f44; border-color:#92400e; color:#fcd34d; }
 .dark .meta-reply-window.closed { background:#4c051944; border-color:#881337; color:#fda4af; }
@@ -40,11 +40,11 @@
 .inbox-page .message-row.out { align-items:flex-end; }
 .inbox-page .bubble { max-width:min(85%,448px); padding:12px; border-radius:3px 16px 16px 16px; }
 .inbox-page .out .bubble { border-radius:16px 3px 16px 16px; }
-.inbox-page .message-meta,.inbox-page .out .message-meta { color:var(--muted); margin:4px 4px 0; font-family:ui-monospace,SFMono-Regular,monospace; font-size:10px; }
+.inbox-page .message-meta,.inbox-page .out .message-meta { color:var(--muted); margin:4px 4px 0; font-family:var(--font-ui); font-size:var(--font-caption); }
 .inbox-page .composer-wrap { padding:0 0 8px; }
 .inbox-page .reply-account { margin:0; padding:5px 14px; }
 .inbox-page .quick-replies { padding:6px 14px; margin:0; background:var(--hover); border-top:1px solid var(--line); border-bottom:1px solid var(--line); align-items:center; }
-.quick-replies-label { font-size:9px; font-weight:700; text-transform:uppercase; color:var(--muted); flex-shrink:0; }
+.quick-replies-label { font-size:var(--font-caption); font-weight:700; text-transform:uppercase; color:var(--muted); flex-shrink:0; }
 .inbox-page .quick-replies button { padding:5px 9px; min-height:28px; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
 .inbox-page .composer { display:grid; grid-template-columns:32px minmax(0,1fr) auto; align-items:end; gap:8px; padding:10px 12px; border:0; border-radius:0; background:var(--surface); }
 .inbox-page .composer textarea { grid-column:2; grid-row:1; min-height:40px; height:40px; max-height:112px; resize:vertical; padding:9px 11px; border:1px solid var(--line); border-radius:12px; background:var(--canvas); font-size:14px; }
@@ -60,14 +60,14 @@
  .app .conversation-list { width:100%; min-width:0; }
  .inbox-page .chat-header { padding:8px 10px; gap:7px; }
  .workspace-contact-title { flex-wrap:wrap; gap:2px 5px; }
- .workspace-contact-title h2 { font-size:12px; }
- .workspace-contact small { font-size:10px; }
+ .workspace-contact-title h2 { font-size:var(--font-body); }
+ .workspace-contact small { font-size:var(--font-caption); }
  .meta-reply-window { margin-left:0; padding:1px 4px; }
  .chat-header .create-order { padding:8px; }
  .chat-header .create-order span { display:none; }
  .inbox-page .composer textarea { font-size:16px; }
  .inbox-page .composer { gap:5px; padding:8px; grid-template-columns:28px minmax(0,1fr) auto; }
- .inbox-page .send { padding:9px; font-size:11px; }
+ .inbox-page .send { padding:9px; font-size:var(--font-small); }
  .inbox-page .bubble { max-width:90%; }
 }
 
@@ -106,7 +106,7 @@
 .inbox-page .chat-header .create-order[aria-pressed=true] { background:#15803d; color:#fff; }
 .inbox-page .bubble { display:flow-root; }
 .inbox-page .bubble.text-only > p { display:inline; margin:0; }
-.inbox-page .bubble .message-meta { display:flex; justify-content:flex-end; align-items:center; gap:4px; margin:5px 0 -2px; font:11px/16px ui-sans-serif,system-ui,sans-serif; white-space:nowrap; color:var(--muted); opacity:.8; }
+.inbox-page .bubble .message-meta { display:flex; justify-content:flex-end; align-items:center; gap:4px; margin:5px 0 -2px; font:var(--font-caption)/16px var(--font-ui); white-space:nowrap; color:var(--muted); opacity:.8; }
 .inbox-page .bubble.text-only .message-meta { display:inline-flex; float:right; margin:5px 0 -2px 12px; }
 .inbox-page .out .bubble:not(.failed) .message-meta { color:#dbeafe; }
 .inbox-page .bubble .message-meta .read-check { color:inherit; }

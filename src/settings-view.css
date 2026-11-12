@@ -24,7 +24,7 @@
 .settings-title p,
 .redesigned-settings .settings-card p {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-body);
   line-height: 1.6;
   margin: 4px 0 0;
 }
@@ -42,7 +42,7 @@
   border-bottom: 1px solid var(--line);
 }
 .redesigned-settings .settings-card h2 {
-  font-size: 12px;
+  font-size: var(--font-body);
   text-transform: uppercase;
   letter-spacing: 0.7px;
   margin: 0;
@@ -50,7 +50,7 @@
 }
 .redesigned-settings label {
   display: block;
-  font-size: 12px;
+  font-size: var(--font-body);
   font-weight: 600;
   color: var(--ink);
 }
@@ -78,7 +78,7 @@
   gap: 6px;
   height: 30px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: var(--font-body);
   color: var(--muted);
 }
 .settings-segments button[aria-pressed="true"] {
@@ -93,7 +93,7 @@
   gap: 9px;
   height: 38px;
   margin-top: 7px;
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 .settings-switch {
   width: 36px;
@@ -124,12 +124,12 @@
   border: 1px solid var(--line);
   padding: 6px 8px;
   border-radius: 8px;
-  font-size: 11px;
+  font-size: var(--font-small);
 }
 .redesigned-settings small {
   display: block;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-small);
   line-height: 1.6;
   margin-top: 7px;
 }
@@ -155,7 +155,7 @@
 }
 .slot-count {
   color: #0369a1;
-  font-size: 11px;
+  font-size: var(--font-small);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -173,7 +173,7 @@
   background: var(--hover);
 }
 .settings-slots legend {
-  font-size: 12px;
+  font-size: var(--font-body);
   font-weight: 700;
   padding: 0 5px;
 }
@@ -185,7 +185,7 @@
   background: var(--surface);
   border-radius: 6px;
   padding: 2px 6px;
-  font-size: 10px;
+  font-size: var(--font-caption);
 }
 .settings-slots label + label {
   margin-top: 10px;
@@ -199,7 +199,7 @@
   border-radius: 9px;
   background: var(--surface);
   color: var(--ink);
-  font-size: 12px;
+  font-size: var(--font-body);
   padding: 9px 11px;
 }
 .redesigned-settings .settings-card input {
@@ -225,7 +225,7 @@
   min-height: 38px;
   padding: 9px 16px;
   border-radius: 12px;
-  font-size: 12px;
+  font-size: var(--font-body);
   white-space: nowrap;
 }
 .settings-server {
@@ -243,7 +243,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 .server-dot {
   width: 7px;
@@ -263,7 +263,7 @@
   border: 1px solid var(--line);
   border-radius: 9px;
   background: var(--surface);
-  font-size: 12px;
+  font-size: var(--font-body);
   white-space: nowrap;
 }
 .settings-logout {
@@ -288,7 +288,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
+  font-size: var(--font-body);
   color: var(--ink);
 }
 @media (max-width: 767px) {

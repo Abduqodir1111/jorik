@@ -8,7 +8,7 @@ import {
   type DeliveryWorksheet,
 } from "../shared/delivery-export";
 import CompactOrderForm from "./CompactOrderForm";
-import { customerOrderHistory } from "../shared/order-form";
+import { customerOrderHistory, nextDeliveryDate } from "../shared/order-form";
 import OrderCard from "./OrderCard";
 import { coalesceAsync } from "./refresh-queue";
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
@@ -49,7 +49,7 @@ function blank(context?: OrderContext): OrderInput {
       ? context.conversation.username || context.conversation.name
       : "",
     source: context?.account.name ?? "Офлайн",
-    date: localDate(),
+    date: nextDeliveryDate(),
     phone: "+998",
     deliveryType: "delivery",
     district: "",

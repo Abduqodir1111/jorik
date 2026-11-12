@@ -1,6 +1,6 @@
 /* Operator workspace. Shared geometry across all views, semantic colors per theme. */
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-ui);
   --surface: #fff;
   --canvas: #f8fafc;
   --hover: #f1f5f9;
@@ -126,7 +126,7 @@ small,
   right: -2px;
   min-width: 17px;
   height: 17px;
-  font-size: 10px;
+  font-size: var(--font-caption);
   font-weight: 700;
   border-radius: 8px;
   background: #ef4444;
@@ -147,7 +147,7 @@ small,
   padding: 0 24px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 .breadcrumb,
 .slash {
@@ -159,7 +159,7 @@ small,
   border-radius: 6px;
   background: var(--hover);
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-caption);
 }
 .app .conversation-list {
   width: 320px;
@@ -176,7 +176,7 @@ small,
   color: var(--ink);
 }
 .list-heading h1 span {
-  font-size: 11px;
+  font-size: var(--font-small);
   background: var(--hover);
   color: var(--muted);
   padding: 3px 7px;
@@ -197,7 +197,7 @@ small,
 }
 .search input {
   padding: 0;
-  font-size: 12px;
+  font-size: var(--font-body);
   background: transparent;
   border: 0;
   box-shadow: none;
@@ -238,7 +238,7 @@ small,
   margin: 10px 14px 12px;
 }
 .source-filter select {
-  font-size: 12px;
+  font-size: var(--font-body);
   border: 1px solid var(--line);
   border-radius: 6px;
   min-width: 0;
@@ -247,7 +247,7 @@ small,
 }
 .source-filter > span {
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-caption);
   margin-left: auto;
   white-space: nowrap;
 }
@@ -284,13 +284,13 @@ small,
   width: 38px;
   height: 38px;
   min-width: 38px;
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 .conversation-title {
   gap: 8px;
 }
 .conversation-title b {
-  font-size: 13px;
+  font-size: var(--font-body);
   color: var(--ink);
   display: flex;
   align-items: center;
@@ -303,12 +303,12 @@ small,
   flex-shrink: 0;
 }
 .conversation-title time {
-  font-size: 10px;
+  font-size: var(--font-caption);
   color: var(--muted);
 }
 .conversation-account {
   margin-top: 3px;
-  font-size: 10px;
+  font-size: var(--font-caption);
   line-height: 15px;
 }
 .account-badge {
@@ -321,7 +321,7 @@ small,
 }
 .preview {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--font-body);
   color: var(--muted);
 }
 .conversation.is-unread .conversation-title b,
@@ -338,20 +338,20 @@ small,
 .unread {
   background: #2563eb;
   color: white;
-  font-size: 10px;
+  font-size: var(--font-caption);
   min-width: 16px;
   height: 16px;
 }
 .inbox-page .list-footer {
   padding: 8px 16px;
-  font-size: 10px;
+  font-size: var(--font-caption);
   color: var(--muted);
   border-top: 1px solid var(--line);
 }
 .stage-badge {
   display: inline-block;
   border-radius: 10px;
-  font-size: 10px;
+  font-size: var(--font-caption);
   line-height: 15px;
   padding: 1px 6px;
   margin-left: 5px;
@@ -414,7 +414,7 @@ small,
   gap: 6px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
-  font-size: 10px;
+  font-size: var(--font-caption);
   padding: 6px 24px;
   color: var(--muted);
 }
@@ -422,7 +422,7 @@ small,
   margin-right: 8px;
   border: 1px solid var(--line);
   border-radius: 5px;
-  font-size: 10px;
+  font-size: var(--font-caption);
   padding: 3px 5px;
 }
 .chat-context > span:last-child {
@@ -446,7 +446,7 @@ small,
   box-shadow: 0 1px 2px #0f172a08;
 }
 .bubble p {
-  font-size: 13px;
+  font-size: var(--font-body);
   line-height: 1.55;
 }
 .out .bubble {
@@ -465,7 +465,7 @@ small,
 .message-meta {
   margin-top: 6px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--font-caption);
 }
 .out .message-meta {
   color: #dbeafe;
@@ -476,7 +476,7 @@ small,
 .date-separator span {
   background: var(--hover);
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-caption);
   padding: 4px 10px;
   border-radius: 12px;
 }
@@ -507,7 +507,7 @@ small,
   border-left: 3px solid #93c5fd;
   padding: 4px 9px;
   margin: 0 0 8px;
-  font-size: 11px;
+  font-size: var(--font-small);
   opacity: 0.8;
   max-height: 65px;
   overflow: hidden;
@@ -522,11 +522,11 @@ small,
   border: 1px solid #fde68a;
   border-radius: 6px;
   padding: 7px 9px;
-  font-size: 11px;
+  font-size: var(--font-small);
   max-width: 100%;
 }
 .unavailable-instagram a {
-  font-size: 11px;
+  font-size: var(--font-small);
   white-space: nowrap;
   color: inherit;
   margin: 0;
@@ -555,7 +555,7 @@ small,
 }
 .inbox-page .reply-account {
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-caption);
   margin-bottom: 8px;
 }
 .quick-replies {
@@ -572,7 +572,7 @@ small,
   border: 0;
   background: var(--hover);
   color: var(--ink);
-  font-size: 11px;
+  font-size: var(--font-small);
   padding: 6px 9px;
   border-radius: 6px;
 }
@@ -602,7 +602,7 @@ small,
   height: 50px;
   min-height: 50px;
   resize: vertical;
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 .dark .composer {
   background: #1e293b;
@@ -619,7 +619,7 @@ small,
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: var(--font-small);
   color: var(--muted);
   border: 0;
   background: none;
@@ -633,7 +633,7 @@ small,
 }
 .send {
   padding: 9px 15px;
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 .send:hover,
 .primary:hover {
@@ -641,7 +641,7 @@ small,
 }
 .composer-bottom {
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--font-caption);
 }
 .reply-strip {
   display: flex;
@@ -651,7 +651,7 @@ small,
   border-left: 3px solid #3b82f6;
   padding: 7px 10px;
   margin-bottom: 8px;
-  font-size: 11px;
+  font-size: var(--font-small);
   border-radius: 4px;
 }
 .reply-strip div {
@@ -699,7 +699,7 @@ small,
   background: transparent;
   border: 0;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: var(--font-body);
   color: var(--ink);
 }
 .template-menu button.selected {
@@ -713,7 +713,7 @@ small,
   color: var(--muted);
 }
 .template-menu kbd {
-  font-size: 10px;
+  font-size: var(--font-caption);
   color: var(--muted);
 }
 .drop-overlay {
@@ -801,7 +801,7 @@ small,
   margin-bottom: 20px;
 }
 .settings-card > p {
-  font-size: 12px;
+  font-size: var(--font-body);
   margin: 8px 0 20px;
 }
 .slot-grid {
@@ -816,12 +816,12 @@ small,
   min-width: 0;
 }
 .slot-grid legend {
-  font-size: 11px;
+  font-size: var(--font-small);
   color: var(--muted);
   padding: 0 5px;
 }
 .slot-grid label {
-  font-size: 12px;
+  font-size: var(--font-body);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -910,7 +910,7 @@ small,
   }
   .quick-replies button {
     padding: 5px;
-    font-size: 10px;
+    font-size: var(--font-caption);
   }
   .bubble {
     max-width: 85%;

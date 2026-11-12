@@ -134,14 +134,14 @@ export default function SettingsView({
                 role="group"
                 aria-label="Размер текста"
               >
-                {[14, 16, 18].map((size, i) => (
+                {[14, 15, 18].map((size) => (
                   <button
                     type="button"
                     key={size}
                     aria-pressed={fontSize === size}
                     onClick={() => setFontSize(size)}
                   >
-                    {["Мелкий", "Средний", "Крупный"][i]}
+                    {size} px
                   </button>
                 ))}
               </div>

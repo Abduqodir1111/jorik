@@ -113,7 +113,7 @@
 .archive-browser small {
   display: block;
   color: var(--muted, #64748b);
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 .archive-search button,
 .archive-search a,
@@ -131,7 +131,7 @@
   padding: 8px 10px;
   text-decoration: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-body);
   cursor: pointer;
 }
 .archive-search button:disabled,
@@ -163,7 +163,7 @@
   align-items: center;
   justify-content: space-between;
   color: var(--muted, #64748b);
-  font-size: 12px;
+  font-size: var(--font-body);
   padding: 8px 14px;
   gap: 8px;
 }
@@ -195,7 +195,7 @@
 }
 .archive-source {
   display: inline-block;
-  font-size: 10px;
+  font-size: var(--font-caption);
   font-weight: 700;
   margin: 8px 0;
   border: 1px solid var(--line, #e2e8f0);
@@ -217,14 +217,14 @@
   margin-top: 8px;
 }
 .archive-hint {
-  font-size: 13px;
+  font-size: var(--font-body);
   color: var(--muted, #64748b);
   display: flex;
   gap: 6px;
 }
 .archive-job,
 .archive-error {
-  font-size: 12px;
+  font-size: var(--font-body);
   margin: 6px 14px;
   padding: 8px;
   border-radius: 8px;
@@ -365,7 +365,7 @@
   background: var(--hover, #f1f5f9);
 }
 .archive-image-grid span {
-  font-size: 12px;
+  font-size: var(--font-body);
   overflow-wrap: anywhere;
   max-width: 100%;
 }
@@ -402,7 +402,7 @@
 }
 .archive-browser-note {
   color: var(--muted, #64748b);
-  font-size: 13px;
+  font-size: var(--font-body);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
