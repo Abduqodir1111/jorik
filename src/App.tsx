@@ -30,6 +30,7 @@ import {
 } from "react";
 import Avatar from "./Avatar";
 import ConversationRow from "./ConversationRow";
+import EmojiButton from "./EmojiButton";
 import MessageTimeline from "./MessageTimeline";
 import { time, date } from "./message-format";
 import { coalesceAsync } from "./refresh-queue";
@@ -1493,57 +1494,70 @@ export default function App() {
                     </div>
                   )}
                   <div className="composer">
-                    <textarea
-                      ref={inputRef}
-                      aria-label="Текст ответа"
-                      placeholder="Напишите сообщение…"
-                      value={editing?.text ?? drafts[c.id] ?? ""}
-                      readOnly={sending}
-                      onFocus={() => setComposerFocused(true)}
-                      onBlur={() => setComposerFocused(false)}
-                      onChange={(e) => {
-                        if (editing) {
-                          setEditing({ ...editing, text: e.target.value });
-                          return;
-                        }
-                        draft(e.target.value);
-                        if (e.target.value === "/") {
-                          setTemplatesOpen(true);
-                          setTemplateIndex(0);
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (
-                          templatesOpen &&
-                          ["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(
-                            e.key,
-                          )
-                        ) {
-                          e.preventDefault();
-                          if (e.key === "Escape") setTemplatesOpen(false);
-                          else if (e.key === "Enter")
-                            insertTemplate(templateIndex);
-                          else
-                            setTemplateIndex((i) =>
-                              nextTemplateIndex(
-                                i,
-                                e.key === "ArrowDown" ? 1 : -1,
-                                slots.length,
-                              ),
-                            );
-                          return;
-                        }
-                        if (
-                          e.key === "Enter" &&
-                          !e.shiftKey &&
-                          !e.nativeEvent.isComposing
-                        ) {
-                          e.preventDefault();
-                          if (editing) void saveEdit();
-                          else void send();
-                        }
-                      }}
-                    />
+                    <div className="composer-input">
+                      <textarea
+                        ref={inputRef}
+                        aria-label="Текст ответа"
+                        placeholder="Напишите сообщение…"
+                        value={editing?.text ?? drafts[c.id] ?? ""}
+                        readOnly={sending}
+                        onFocus={() => setComposerFocused(true)}
+                        onBlur={() => setComposerFocused(false)}
+                        onChange={(e) => {
+                          if (editing) {
+                            setEditing({ ...editing, text: e.target.value });
+                            return;
+                          }
+                          draft(e.target.value);
+                          if (e.target.value === "/") {
+                            setTemplatesOpen(true);
+                            setTemplateIndex(0);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (
+                            templatesOpen &&
+                            ["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(
+                              e.key,
+                            )
+                          ) {
+                            e.preventDefault();
+                            if (e.key === "Escape") setTemplatesOpen(false);
+                            else if (e.key === "Enter")
+                              insertTemplate(templateIndex);
+                            else
+                              setTemplateIndex((i) =>
+                                nextTemplateIndex(
+                                  i,
+                                  e.key === "ArrowDown" ? 1 : -1,
+                                  slots.length,
+                                ),
+                              );
+                            return;
+                          }
+                          if (
+                            e.key === "Enter" &&
+                            !e.shiftKey &&
+                            !e.nativeEvent.isComposing
+                          ) {
+                            e.preventDefault();
+                            if (editing) void saveEdit();
+                            else void send();
+                          }
+                        }}
+                      />
+                      <EmojiButton
+                        key={c.id + ":" + (editing?.message.id ?? "draft")}
+                        input={inputRef}
+                        value={editing?.text ?? drafts[c.id] ?? ""}
+                        disabled={sending}
+                        onOpen={() => setTemplatesOpen(false)}
+                        onChange={(text) => {
+                          if (editing) setEditing({ ...editing, text });
+                          else draft(text);
+                        }}
+                      />
+                    </div>
                     <div className="composer-toolbar">
                       <input
                         ref={fileInput}

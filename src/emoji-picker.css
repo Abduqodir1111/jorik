@@ -1,0 +1,148 @@
+.inbox-page .composer-input {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+.inbox-page .composer .composer-input textarea {
+  display: block;
+  width: 100%;
+  padding-right: 52px;
+}
+.emoji-toggle {
+  position: absolute;
+  right: 12px;
+  bottom: 4px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--muted);
+}
+.emoji-toggle:hover,
+.emoji-toggle[aria-expanded="true"] {
+  color: var(--accent);
+  background: var(--hover);
+}
+.emoji-popover {
+  position: fixed;
+  z-index: 3000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 12px 40px #0003;
+  font: 14px/1.4 var(--font-ui);
+}
+.emoji-popover header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.emoji-popover header button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+.emoji-search {
+  display: flex;
+  flex-direction: row;
+  gap: 7px;
+  align-items: center;
+  padding: 0 10px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.emoji-popover .emoji-search input {
+  padding: 8px 0;
+  min-width: 0;
+  width: 100%;
+  height: 36px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.emoji-categories {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.emoji-categories button {
+  width: 38px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 21px;
+}
+.emoji-categories button[aria-pressed="true"] {
+  background: var(--hover);
+  outline: 1px solid var(--line);
+}
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  align-content: start;
+  gap: 2px;
+  overflow-y: auto;
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+.emoji-grid button {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  height: 36px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 23px;
+}
+.emoji-grid button,
+.emoji-categories button {
+  font-family:
+    "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+}
+.emoji-popover button:hover {
+  background: var(--hover);
+}
+.emoji-popover button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.emoji-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 12px;
+}
+@media (max-width: 767px) {
+  .emoji-popover .emoji-search input {
+    font-size: 16px;
+  }
+}
+
+/* Keep room for text beside the in-field smile button on a phone. */
+@media (max-width: 767px) {
+  .inbox-page .composer .send {
+    width: 40px;
+    min-width: 40px;
+    padding: 9px;
+    font-size: 0;
+    gap: 0;
+  }
+}
+
+.emoji-toggle,
+.emoji-popover button {
+  touch-action: manipulation;
+}
