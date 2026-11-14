@@ -657,6 +657,52 @@ export class TelegramIntegration {
         new Date(0).toISOString(),
       );
   }
+  private seenRequests = new Map<string, Promise<void>>();
+
+  async markSeen(conversationId: string, messageId: string): Promise<void> {
+    const conv = this.store.conversation(conversationId);
+    if (conv.accountId !== this.accountId)
+      throw new Error("Неверный аккаунт Telegram");
+    const row = this.store.db
+      .prepare(
+        "SELECT external_id FROM messages WHERE id=? AND conversation_id=? AND direction='in' AND deleted_at IS NULL",
+      )
+      .get(messageId, conversationId) as { external_id: string } | undefined;
+    const maxId = Number(row?.external_id);
+    if (
+      !row ||
+      !/^\d+$/.test(row.external_id) ||
+      !Number.isSafeInteger(maxId) ||
+      maxId <= 0 ||
+      maxId > 2147483647
+    )
+      throw new Error("Сообщение для прочтения Telegram не найдено");
+    const key = `${conversationId}:${maxId}`;
+    const existing = this.seenRequests.get(key);
+    if (existing) return existing;
+    if (!this.authenticated || !this.client?.connected || this.closed)
+      throw new Error("Telegram не подключён для отметки прочтения.");
+    const task = (async () => {
+      try {
+        await this.client!.invoke(
+          new Api.messages.ReadHistory({
+            peer: this.peer(conv.externalId),
+            maxId,
+          }),
+        );
+        this.markInboxRead(conv.externalId, maxId);
+      } catch (error) {
+        throw new Error(safeTelegramError(error));
+      }
+    })();
+    this.seenRequests.set(key, task);
+    try {
+      await task;
+    } finally {
+      this.seenRequests.delete(key);
+    }
+  }
+
   async profilePhoto(conversationId: string): Promise<Buffer | null> {
     const c = this.store.conversation(conversationId);
     if (c.accountId !== this.accountId)

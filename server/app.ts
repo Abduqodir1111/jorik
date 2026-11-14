@@ -726,15 +726,24 @@ export async function createApp(opts: {
           throughId: z.string().uuid().optional(),
         })
         .parse(req.body);
-      let remaining = 0;
-      if (!unread && throughId) {
-        const boundary = db
-          .prepare(
-            "SELECT created_at,rowid FROM messages WHERE id=? AND conversation_id=? AND direction='in' AND deleted_at IS NULL",
-          )
-          .get(throughId, conv.id) as
-          { created_at: string; rowid: number } | undefined;
-        if (!boundary) throw new Error("Сообщение для прочтения не найдено");
+      // Freeze the rendered boundary before awaiting a provider. A later arrival
+      // must not be marked read just because its request completed afterwards.
+      const boundary = unread
+        ? undefined
+        : (db
+            .prepare(
+              "SELECT id,created_at,rowid FROM messages WHERE conversation_id=? AND direction='in' AND deleted_at IS NULL" +
+                (throughId
+                  ? " AND id=?"
+                  : " ORDER BY created_at DESC,rowid DESC LIMIT 1"),
+            )
+            .get(...(throughId ? [conv.id, throughId] : [conv.id])) as
+            { id: string; created_at: string; rowid: number } | undefined);
+      if (!unread && throughId && !boundary)
+        throw new Error("Сообщение для прочтения не найдено");
+      const remainingUnread = () => {
+        const current = store.conversation(conv.id).unread;
+        if (!boundary) return 0;
         const after = db
           .prepare(
             "SELECT count(*) AS count FROM messages WHERE conversation_id=? AND direction='in' AND deleted_at IS NULL AND (created_at>? OR (created_at=? AND rowid>?))",
@@ -745,22 +754,25 @@ export async function createApp(opts: {
             boundary.created_at,
             boundary.rowid,
           ) as { count: number };
-        remaining = Math.min(conv.unread, after.count);
+        return Math.min(current, after.count);
+      };
+      const account = store.account(conv.accountId);
+      if (!unread && boundary && account.mode === "real") {
+        if (account.adapter === "instagram-graph" && remainingUnread() === 0)
+          await instagramFor(account.id).markSeen(conv.id);
+        else if (account.platform === "telegram") {
+          const telegram = telegrams.get(account.id);
+          if (!telegram)
+            throw new Error("Telegram не подключён для отметки прочтения.");
+          await telegram.markSeen(conv.id, boundary.id);
+        }
       }
+      // Do not report local success if the remote acknowledgement failed.
       db.prepare("UPDATE conversations SET unread=? WHERE id=?").run(
-        unread ? Math.max(1, conv.unread) : remaining,
-        req.params.id,
+        unread ? Math.max(1, conv.unread) : remainingUnread(),
+        conv.id,
       );
       publish();
-      const account = store.account(conv.accountId);
-      if (
-        !unread &&
-        remaining === 0 &&
-        account.mode === "real" &&
-        account.adapter === "instagram-graph"
-      ) {
-        await instagramFor(account.id).markSeen(conv.id);
-      }
       return { ok: true };
     },
   );
