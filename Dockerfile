@@ -21,6 +21,8 @@ COPY --from=build --chown=node:node /app/dist-server ./dist-server
 COPY --from=build --chown=node:node /app/migrations ./migrations
 COPY --from=build --chown=node:node /app/public ./public
 COPY --from=build --chown=node:node /app/package.json ./package.json
+COPY scripts/verify-runtime.mjs ./scripts/verify-runtime.mjs
+RUN node scripts/verify-runtime.mjs
 RUN mkdir /app/data && chown node:node /app/data
 COPY deploy/synology/entrypoint.sh /usr/local/bin/jorik-entrypoint
 RUN chmod 755 /usr/local/bin/jorik-entrypoint

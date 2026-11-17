@@ -16,6 +16,8 @@
 !migrations/**
 !public/
 !public/**
+!scripts/
+!scripts/verify-runtime.mjs
 
 !deploy/
 !deploy/synology/
