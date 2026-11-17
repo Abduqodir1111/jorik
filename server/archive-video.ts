@@ -19,6 +19,64 @@ export interface PreparedVideo {
   width: number;
   height: number;
 }
+class ProbeOutputError extends Error {
+  constructor(
+    readonly kind: "empty" | "invalid_json" | "invalid_shape" = "invalid_shape",
+  ) {
+    super("Не удалось прочитать сведения о видео. Повторите подготовку позже.");
+  }
+}
+export function parseVideoMetadata(stdout: string) {
+  if (!stdout.trim()) throw new ProbeOutputError("empty");
+  let p: any;
+  try {
+    p = JSON.parse(stdout);
+  } catch {
+    throw new ProbeOutputError("invalid_json");
+  }
+  if (
+    !p ||
+    !Array.isArray(p.streams) ||
+    !p.format ||
+    typeof p.format !== "object"
+  )
+    throw new ProbeOutputError();
+  const v = p.streams.find((s: any) => s?.codec_type === "video"),
+    duration = Number(p.format.duration),
+    width = Number(v?.width),
+    height = Number(v?.height);
+  if (
+    !v ||
+    !Number.isFinite(duration) ||
+    duration <= 0 ||
+    duration > 180 ||
+    !Number.isSafeInteger(width) ||
+    width <= 0 ||
+    !Number.isSafeInteger(height) ||
+    height <= 0 ||
+    width * height > 2100000
+  )
+    throw new Error(
+      "Для этого NAS: видео до 3 минут и Full HD (1920×1080 или 1080×1920). Видео 4K сначала уменьшите на компьютере.",
+    );
+  return {
+    duration,
+    width,
+    height,
+    codec: v.codec_name,
+    pix: v.pix_fmt,
+    transfer: v.color_transfer,
+    primaries: v.color_primaries,
+    space: v.color_space,
+    range: v.color_range,
+    rotation: Number(
+      v.side_data_list?.find((s: any) => s.rotation !== undefined)?.rotation ||
+        0,
+    ),
+    sar: v.sample_aspect_ratio,
+    audio: p.streams.find((s: any) => s?.codec_type === "audio"),
+  };
+}
 export class ArchiveVideo {
   private queue: {
     id: string;
@@ -31,6 +89,7 @@ export class ArchiveVideo {
   private stopped = false;
   private running?: Promise<void>;
   private controller = new AbortController();
+  private metadata = new Map<string, ReturnType<typeof parseVideoMetadata>>();
   constructor(
     readonly index: ArchiveIndex,
     readonly cacheDir: string,
@@ -145,60 +204,95 @@ export class ArchiveVideo {
     }
   }
   private async probe(file: string) {
-    let stdout: string;
-    try {
-      ({ stdout } = await run(
-        this.ffprobe,
-        [
-          "-v",
-          "error",
-          "-threads",
-          "1",
-          "-show_entries",
-          "format=duration:stream=codec_type,codec_name,pix_fmt,width,height,color_transfer,color_space,color_primaries,color_range,avg_frame_rate,sample_aspect_ratio,channels:stream_side_data=rotation",
-          "-of",
-          "json",
-          file,
-        ],
-        { timeout: 60000, maxBuffer: 65536, signal: this.controller.signal },
-      ));
-    } catch {
-      throw new Error(
-        "Не удалось прочитать видео. Возможно, диск NAS занят. Повторите подготовку позже.",
-      );
+    const before = await fs.stat(file);
+    const key = JSON.stringify([file, before.size, before.mtimeMs]);
+    const cached = this.metadata.get(key);
+    if (cached) {
+      this.metadata.delete(key);
+      this.metadata.set(key, cached);
+      return cached;
     }
-    const p = JSON.parse(stdout),
-      v = p.streams?.find((s: any) => s.codec_type === "video"),
-      duration = Number(p.format?.duration);
-    if (
-      !v ||
-      !Number.isFinite(duration) ||
-      duration <= 0 ||
-      duration > 180 ||
-      !v.width ||
-      !v.height ||
-      v.width * v.height > 2100000
-    )
-      throw new Error(
-        "Для этого NAS: видео до 3 минут и Full HD (1920×1080 или 1080×1920). Видео 4K сначала уменьшите на компьютере.",
-      );
-    return {
-      duration,
-      width: Number(v.width),
-      height: Number(v.height),
-      codec: v.codec_name,
-      pix: v.pix_fmt,
-      transfer: v.color_transfer,
-      primaries: v.color_primaries,
-      space: v.color_space,
-      range: v.color_range,
-      rotation: Number(
-        v.side_data_list?.find((s: any) => s.rotation !== undefined)
-          ?.rotation || 0,
-      ),
-      sar: v.sample_aspect_ratio,
-      audio: p.streams?.find((s: any) => s.codec_type === "audio"),
-    };
+    const deadline = Date.now() + 60000;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let retryable = false;
+      try {
+        const { stdout } = await run(
+          this.ffprobe,
+          [
+            "-v",
+            "error",
+            "-threads",
+            "1",
+            "-protocol_whitelist",
+            "file,pipe",
+            "-show_entries",
+            "format=duration:stream=codec_type,codec_name,pix_fmt,width,height,color_transfer,color_space,color_primaries,color_range,avg_frame_rate,sample_aspect_ratio,channels:stream_side_data=rotation",
+            "-of",
+            "json",
+            file,
+          ],
+          {
+            timeout: Math.max(1, deadline - Date.now()),
+            maxBuffer: 65536,
+            signal: this.controller.signal,
+          },
+        );
+        const after = await fs.stat(file);
+        if (after.size !== before.size || after.mtimeMs !== before.mtimeMs)
+          throw new Error(
+            "Файл видео изменился. Дождитесь завершения копирования и повторите подготовку.",
+          );
+        const result = parseVideoMetadata(stdout);
+        if (this.metadata.size >= 64)
+          this.metadata.delete(this.metadata.keys().next().value!);
+        this.metadata.set(key, result);
+        return result;
+      } catch (error) {
+        if (this.stopped || this.controller.signal.aborted)
+          throw new Error("Подготовка остановлена");
+        const e = error as NodeJS.ErrnoException & {
+          stderr?: string;
+          killed?: boolean;
+        };
+        retryable =
+          error instanceof ProbeOutputError ||
+          ("stderr" in e &&
+            e.code !== "ENOENT" &&
+            e.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" &&
+            !/invalid data|moov atom not found|invalid argument/i.test(
+              e.stderr || "",
+            ));
+        if (retryable || "stderr" in e)
+          console.warn(
+            JSON.stringify({
+              event: "video_metadata_probe_failed",
+              attempt: attempt + 1,
+              kind:
+                error instanceof ProbeOutputError
+                  ? error.kind
+                  : "process_error",
+              elapsedMs: 60000 - Math.max(0, deadline - Date.now()),
+              retry: attempt === 0 && retryable && deadline - Date.now() > 500,
+              code:
+                typeof e.code === "number" ||
+                (typeof e.code === "string" && /^[A-Z_0-9]+$/.test(e.code))
+                  ? e.code
+                  : undefined,
+            }),
+          );
+        if (attempt === 0 && retryable && deadline - Date.now() > 500) {
+          // Retry metadata only, never conversion/upload/provider submission.
+          await delay(250, undefined, { signal: this.controller.signal });
+          continue;
+        }
+        if (error instanceof ProbeOutputError) throw error;
+        if (!("stderr" in e) && e.code === undefined) throw error;
+        throw new Error(
+          "Не удалось прочитать видео. Проверьте, что файл полностью скопирован, и повторите подготовку позже.",
+        );
+      }
+    }
+    throw new ProbeOutputError();
   }
   private async convert(id: string): Promise<PreparedVideo> {
     if (this.stopped) throw new Error("Подготовка остановлена");
