@@ -39,7 +39,7 @@ export function generateDeliveryWorksheet(
         (o.date >= filter.startDate &&
           o.date <= filter.endDate &&
           (filter.source === "ALL" ||
-            o.source.trim().toUpperCase() === filter.source))),
+            (o.storeId ?? o.source.trim().toUpperCase()) === filter.source))),
   );
   return {
     headers: [...courierHeaders],

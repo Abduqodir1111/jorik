@@ -271,3 +271,7 @@
 
 .location-card > span { min-width: 0; overflow-wrap: anywhere; }
 .location-card > svg { flex-shrink: 0; }
+
+.draft-conflict { padding: 10px; background: var(--surface, #fff); border: 1px solid #d97706; border-radius: 8px; font-size: 14px; }
+.draft-conflict p { margin: 0 0 6px; }
+.draft-conflict button { padding: 6px 10px; margin: 0 8px 4px 0; border: 1px solid currentColor; border-radius: 6px; }

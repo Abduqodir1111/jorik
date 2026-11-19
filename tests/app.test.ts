@@ -249,7 +249,11 @@ test("Авторизация, маршрутизация, дедупликаци
       method: "PUT",
       url: `/api/conversations/${c1}/draft`,
       headers,
-      payload: { text: "Важный черновик" },
+      payload: {
+        text: "Важный черновик",
+        version: ctx.store.conversation(c1).draftVersion,
+        key: randomUUID(),
+      },
     });
     const interrupted = ctx.store.enqueue(c1, "Прервано", randomUUID());
     ctx.db
@@ -321,9 +325,9 @@ test("Устаревшая версия не затирает черновик; 
     };
     seed(store);
     const c = store.conversations()[0];
-    for (const [revision, text] of [
-      [200, "Последний черновик"],
-      [100, "Устаревший черновик"],
+    for (const [version, text, expected] of [
+      [0, "Последний черновик", 200],
+      [0, "Устаревший черновик", 409],
     ] as const)
       assert.equal(
         (
@@ -331,10 +335,10 @@ test("Устаревшая версия не затирает черновик; 
             method: "PUT",
             url: `/api/conversations/${c.id}/draft`,
             headers,
-            payload: { text, revision },
+            payload: { text, version, key: randomUUID() },
           })
         ).statusCode,
-        200,
+        expected,
       );
     assert.equal(store.conversation(c.id).draft, "Последний черновик");
     const result = await app.inject({
@@ -410,16 +414,30 @@ test("Deployment: only the explicitly configured public origin may write remotel
 
 test("HTTPS security headers also protect unauthorized responses without enforcing CSP", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jorik-headers-"));
-  const { app } = await createApp({ dataDir: dir, mode: "demo", worker: false, publicBaseUrl: "https://inbox.example.com" });
+  const { app } = await createApp({
+    dataDir: dir,
+    mode: "demo",
+    worker: false,
+    publicBaseUrl: "https://inbox.example.com",
+  });
   try {
     for (const url of ["/privacy", "/api/state"]) {
       const result = await app.inject({ url });
-      assert.equal(result.headers["strict-transport-security"], "max-age=31536000");
+      assert.equal(
+        result.headers["strict-transport-security"],
+        "max-age=31536000",
+      );
       assert.equal(result.headers["x-frame-options"], "DENY");
       assert.match(String(result.headers["permissions-policy"]), /camera=\(\)/);
-      assert.match(String(result.headers["content-security-policy-report-only"]), /frame-ancestors 'none'/);
+      assert.match(
+        String(result.headers["content-security-policy-report-only"]),
+        /frame-ancestors 'none'/,
+      );
       assert.equal(result.headers["content-security-policy"], undefined);
     }
     assert.equal((await app.inject({ url: "/api/state" })).statusCode, 401);
-  } finally { await app.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+  } finally {
+    await app.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

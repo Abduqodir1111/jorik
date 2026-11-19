@@ -9,9 +9,10 @@ export function mergeArchiveJobs(old: ArchiveJob[], incoming: ArchiveJob[]) {
     );
     if (i < 0) next.push(job);
     else if (
-      (next[i].local && !job.local) ||
-      (Boolean(job.local) === Boolean(next[i].local) &&
-        (job.updatedAt ?? 0) >= (next[i].updatedAt ?? 0))
+      (!next[i].deleted || job.deleted) &&
+      ((next[i].local && !job.local) ||
+        (Boolean(job.local) === Boolean(next[i].local) &&
+          (job.updatedAt ?? 0) >= (next[i].updatedAt ?? 0)))
     )
       next[i] = job;
   }
@@ -24,7 +25,9 @@ export function archiveTimeline(
   jobs: ArchiveJob[],
   conversation: string | null,
 ): Message[] {
-  const relevant = jobs.filter((j) => j.conversationId === conversation);
+  const relevant = jobs.filter(
+    (j) => !j.deleted && j.conversationId === conversation,
+  );
   const byMessage = new Map(
     relevant.filter((j) => j.messageId).map((j) => [j.messageId, j]),
   );

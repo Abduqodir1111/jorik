@@ -107,6 +107,24 @@ test("Video intent is idempotent under parallel submissions, persisted and never
       store.messages(c.id).filter((m) => m.id === current.messageId).length,
       1,
     );
+    db.prepare("UPDATE messages SET deleted_at=? WHERE id=?").run(
+      new Date().toISOString(),
+      current.messageId,
+    );
+    assert.equal(
+      (await app.inject("/api/archive/jobs"))
+        .json()
+        .some((j: ArchiveJob) => j.id === job.id && !j.deleted),
+      false,
+    );
+    assert.equal(
+      archiveTimeline(
+        store.messages(c.id),
+        archiveProgress(store).list(),
+        c.id,
+      ).some((m) => m.archiveJob?.id === job.id),
+      false,
+    );
     assert.ok(publications.some((j) => j.phase === "uploading"));
     assert.ok(publications.some((j) => j.state === "sent"));
   }));

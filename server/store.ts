@@ -13,7 +13,7 @@ import {
   type IncomingEvent,
   type Adapter,
 } from "./adapters.js";
-const conversationSelect = `SELECT c.id,c.account_id AS accountId,c.external_id AS externalId,c.name,c.username,c.stage,c.unread,(c.unread>0) AS needsReply,c.updated_at AS updatedAt,c.draft,(SELECT MAX(created_at) FROM messages WHERE conversation_id=c.id AND direction='in') AS lastIncomingAt,COALESCE((SELECT text FROM messages WHERE conversation_id=c.id AND deleted_at IS NULL ORDER BY created_at DESC,rowid DESC LIMIT 1),'') AS preview FROM conversations c`;
+const conversationSelect = `SELECT c.id,c.account_id AS accountId,c.external_id AS externalId,c.name,c.username,c.stage,c.unread,(c.unread>0) AS needsReply,c.updated_at AS updatedAt,c.draft,c.draft_version AS draftVersion,(SELECT MAX(created_at) FROM messages WHERE conversation_id=c.id AND direction='in') AS lastIncomingAt,COALESCE((SELECT text FROM messages WHERE conversation_id=c.id AND deleted_at IS NULL ORDER BY created_at DESC,rowid DESC LIMIT 1),'') AS preview FROM conversations c`;
 export class Store {
   constructor(
     public db: DB,
@@ -334,9 +334,15 @@ export class Store {
         .run(randomUUID(), mid, c.id, key);
       this.db
         .prepare(
-          "UPDATE conversations SET draft=CASE WHEN ? THEN draft ELSE '' END,updated_at=? WHERE id=?",
+          "UPDATE conversations SET draft=CASE WHEN ? THEN draft ELSE '' END,draft_version=draft_version+CASE WHEN ? THEN 0 ELSE 1 END,draft_key=CASE WHEN ? THEN draft_key ELSE '' END,updated_at=? WHERE id=?",
         )
-        .run(options.preserveDraft ? 1 : 0, now, id);
+        .run(
+          options.preserveDraft ? 1 : 0,
+          options.preserveDraft ? 1 : 0,
+          options.preserveDraft ? 1 : 0,
+          now,
+          id,
+        );
       this.changed();
       return mid;
     })();

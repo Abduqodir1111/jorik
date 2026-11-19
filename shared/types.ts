@@ -43,6 +43,7 @@ export interface Conversation {
   updatedAt: string;
   preview: string;
   draft: string;
+  draftVersion?: number;
 }
 export interface Attachment {
   address?: string;

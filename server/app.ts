@@ -687,23 +687,52 @@ export async function createApp(opts: {
   );
   app.put<{ Params: { id: string } }>(
     "/api/conversations/:id/draft",
-    async (req) => {
+    async (req, reply) => {
       store.conversation(req.params.id);
-      const { text, revision } = z
+      const body = z
         .object({
           text: z.string().max(10000),
-          revision: z
+          version: z
             .number()
             .int()
             .nonnegative()
             .max(Number.MAX_SAFE_INTEGER)
-            .default(Date.now() * 1000),
+            .optional(),
+          key: z.string().uuid().optional(),
         })
         .parse(req.body);
-      db.prepare(
-        "UPDATE conversations SET draft=?,draft_revision=? WHERE id=? AND draft_revision<=?",
-      ).run(text, revision, req.params.id, revision);
-      return { ok: true };
+      if (body.version === undefined || !body.key)
+        return reply
+          .code(428)
+          .send({
+            error: "Обновите страницу для безопасного сохранения черновиков.",
+          });
+      const result = db.transaction(() => {
+        const current = db
+          .prepare(
+            "SELECT draft AS text,draft_version AS version,draft_key AS key FROM conversations WHERE id=?",
+          )
+          .get(req.params.id) as { text: string; version: number; key: string };
+        if (current.key === body.key && current.text === body.text)
+          return { status: 200, body: { ok: true, version: current.version } };
+        if (current.version !== body.version)
+          return {
+            status: 409,
+            body: {
+              error:
+                "Черновик изменён на другом устройстве. Ваш текст сохранён в поле — выберите нужный вариант.",
+              currentDraft: { text: current.text, version: current.version },
+            },
+          };
+        db.prepare(
+          "UPDATE conversations SET draft=?,draft_version=draft_version+1,draft_key=? WHERE id=?",
+        ).run(body.text, body.key, req.params.id);
+        return {
+          status: 200,
+          body: { ok: true, version: current.version + 1 },
+        };
+      })();
+      return reply.code(result.status).send(result.body);
     },
   );
   const archive = registerArchive(app, store, opts.dataDir, opts.archive);

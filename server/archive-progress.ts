@@ -1,11 +1,12 @@
 import type { Store } from "./store.js";
 import type { ArchiveJob, ArchiveProgress } from "../shared/archive.js";
 export function archiveProgress(store: Store) {
-  const select = `SELECT j.*,m.status AS message_status,m.error AS message_error FROM archive_jobs j LEFT JOIN messages m ON m.id=j.message_id`;
+  const select = `SELECT j.*,m.status AS message_status,m.error AS message_error,m.deleted_at AS deleted_at FROM archive_jobs j LEFT JOIN messages m ON m.id=j.message_id`;
   function decode(r: any): ArchiveJob {
     const state = r.message_status || r.state;
     return {
       id: r.id,
+      deleted: !!r.deleted_at,
       clientKey: r.idempotency_key,
       conversationId: r.conversation_id,
       entryId: r.entry_id,

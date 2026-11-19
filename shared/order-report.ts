@@ -22,7 +22,7 @@ export function generateOrderReport(
         o.date >= filter.startDate &&
         o.date <= filter.endDate &&
         (filter.source === "ALL" ||
-          o.source.trim().toUpperCase() === filter.source),
+          (o.storeId ?? o.source.trim().toUpperCase()) === filter.source),
     )
     .sort(
       (a, b) =>
@@ -36,7 +36,7 @@ export function generateOrderReport(
   >();
   const total = [0, 0, 0, 0, 0, 0];
   for (const o of selected) {
-    const source = o.source.trim().toUpperCase(),
+    const source = o.storeId ?? o.source.trim().toUpperCase(),
       type = types[o.deliveryType];
     const key = JSON.stringify([source, type]);
     const group = groups.get(key) || {

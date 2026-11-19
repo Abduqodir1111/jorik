@@ -81,6 +81,7 @@ test("Orders: validation, immutable chat source, update by ID, phone history, re
         await ctx.app.inject({
           method: "PUT",
           url: "/api/orders/" + id,
+          headers: { "If-Match": JSON.stringify(original.updatedAt) },
           payload: { ...input, source: "Подмена" },
         })
       ).statusCode,
@@ -89,6 +90,7 @@ test("Orders: validation, immutable chat source, update by ID, phone history, re
     const changed = await ctx.app.inject({
       method: "PUT",
       url: "/api/orders/" + id,
+      headers: { "If-Match": JSON.stringify(original.updatedAt) },
       payload: { ...input, amount: 120000, isPaid: true },
     });
     assert.equal(changed.json().id, id);
@@ -101,6 +103,7 @@ test("Orders: validation, immutable chat source, update by ID, phone history, re
     await ctx.app.inject({
       method: "PATCH",
       url: "/api/orders/" + id + "/refused",
+      headers: { "If-Match": JSON.stringify(changed.json().updatedAt) },
       payload: { refused: true },
     });
     const pickup = await ctx.app.inject({
@@ -129,8 +132,17 @@ test("Orders: validation, immutable chat source, update by ID, phone history, re
     assert.equal(saved.find((o) => o.id === id)?.amount, 120000);
     assert.equal(courierRows(saved, base.date).length, 0);
     assert.equal(
-      (await ctx.app.inject({ method: "DELETE", url: "/api/orders/" + id }))
-        .statusCode,
+      (
+        await ctx.app.inject({
+          method: "DELETE",
+          url: "/api/orders/" + id,
+          headers: {
+            "If-Match": JSON.stringify(
+              saved.find((o) => o.id === id)!.updatedAt,
+            ),
+          },
+        })
+      ).statusCode,
       200,
     );
     assert.equal(
@@ -174,16 +186,46 @@ test("Courier XLSX: exact columns, shop instead of buyer, paid amount, exclusion
   assert.equal(sheet.getCell("H2").value, "");
 });
 
-test('Mail orders persist separately without address fields and join the courier Excel export',async()=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'jorik-mail-'));
- const ctx=await createApp({dataDir:dir,mode:'demo',localAccess:true,worker:false});
- try{
- const r=await ctx.app.inject({method:'POST',url:'/api/orders',payload:{...base,deliveryType:'mail',district:'',address:'Must clear',coordinates:'Must clear'}});
- assert.equal(r.statusCode,201);const order=r.json() as Order;
- assert.equal(order.deliveryType,'mail');assert.equal(order.district,'');assert.equal(order.address,'');assert.equal(order.coordinates,'');
- const saved=(await ctx.app.inject('/api/orders')).json() as Order[];assert.equal(saved[0].deliveryType,'mail');
- const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await courierWorkbook(saved,base.date));
- const sheet=workbook.worksheets[0];assert.equal(sheet.rowCount,2);assert.equal(sheet.getCell('H2').value,'Почта');assert.equal(sheet.getCell('D2').value,base.amount);
- assert.equal(courierRows([{...order,refused:true}],base.date).length,0);
- }finally{await ctx.app.close();fs.rmSync(dir,{recursive:true,force:true});}
+test("Mail orders persist separately without address fields and join the courier Excel export", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jorik-mail-"));
+  const ctx = await createApp({
+    dataDir: dir,
+    mode: "demo",
+    localAccess: true,
+    worker: false,
+  });
+  try {
+    const r = await ctx.app.inject({
+      method: "POST",
+      url: "/api/orders",
+      payload: {
+        ...base,
+        deliveryType: "mail",
+        district: "",
+        address: "Must clear",
+        coordinates: "Must clear",
+      },
+    });
+    assert.equal(r.statusCode, 201);
+    const order = r.json() as Order;
+    assert.equal(order.deliveryType, "mail");
+    assert.equal(order.district, "");
+    assert.equal(order.address, "");
+    assert.equal(order.coordinates, "");
+    const saved = (await ctx.app.inject("/api/orders")).json() as Order[];
+    assert.equal(saved[0].deliveryType, "mail");
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await courierWorkbook(saved, base.date));
+    const sheet = workbook.worksheets[0];
+    assert.equal(sheet.rowCount, 2);
+    assert.equal(sheet.getCell("H2").value, "Почта");
+    assert.equal(sheet.getCell("D2").value, base.amount);
+    assert.equal(
+      courierRows([{ ...order, refused: true }], base.date).length,
+      0,
+    );
+  } finally {
+    await ctx.app.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

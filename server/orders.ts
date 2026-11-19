@@ -15,6 +15,7 @@ const schema = z
     conversationId: z.string().uuid().nullable(),
     client: z.string().trim().min(1).max(160),
     source: z.string().trim().min(1).max(100),
+    storeId: z.enum(["STOREBOOKS", "MANGASTORE"]).optional(),
     date,
     phone: z.string().regex(/^\+998\d{9}$/, "Введите 9 цифр после +998"),
     additionalPhone: z
@@ -60,7 +61,12 @@ export function registerOrders(app: FastifyInstance, store: Store) {
     order: Order,
     expected: string | string[] | undefined,
   ) => {
-    if (expected !== undefined && expected !== JSON.stringify(order.updatedAt))
+    if (expected === undefined)
+      throw Object.assign(
+        new Error("Обновите страницу: для изменения заказа нужна его версия."),
+        { statusCode: 428 },
+      );
+    if (expected !== JSON.stringify(order.updatedAt))
       throw Object.assign(
         new Error(
           "Заказ уже изменён другим продавцом. Скопируйте свои правки, закройте форму и откройте заказ заново.",
@@ -88,11 +94,26 @@ export function registerOrders(app: FastifyInstance, store: Store) {
           (o.client !== existing.client || o.source !== existing.source)))
     )
       throw new Error("Клиент и источник заказа из чата не изменяются");
+    o.storeId = existing?.storeId;
     if (o.conversationId && !existing) {
       const c = store.conversation(o.conversationId),
         a = store.account(c.accountId);
       o.client = c.username || c.name;
       o.source = a.name;
+      const account = db
+        .prepare("SELECT store_key FROM accounts WHERE id=?")
+        .get(a.id) as { store_key: "STOREBOOKS" | "MANGASTORE" | null };
+      const canonical = a.name.trim().toUpperCase();
+      o.storeId =
+        account.store_key ??
+        (canonical === "STOREBOOKS" || canonical === "MANGASTORE"
+          ? canonical
+          : undefined);
+      if (o.storeId && !account.store_key)
+        db.prepare("UPDATE accounts SET store_key=? WHERE id=?").run(
+          o.storeId,
+          a.id,
+        );
     } else if (!o.conversationId && !manualSources.some((s) => s === o.source))
       throw new Error("Неверный источник ручного заказа");
     if (o.deliveryType !== "delivery") {
@@ -135,7 +156,7 @@ export function registerOrders(app: FastifyInstance, store: Store) {
     const source =
       filter.source === "ALL"
         ? ""
-        : " AND upper(trim(json_extract(data,'$.source')))=?";
+        : " AND COALESCE(json_extract(data,'$.storeId'),upper(trim(json_extract(data,'$.source'))))=?";
     if (source) params.push(filter.source);
     const rows = db
       .prepare(
@@ -154,15 +175,40 @@ export function registerOrders(app: FastifyInstance, store: Store) {
     return rows.map(decode);
   });
   app.post("/api/orders", async (req, reply) => {
-    const o = validate(req.body),
-      id = randomUUID(),
-      now = new Date().toISOString();
-    db.prepare(
-      "INSERT INTO orders(id,date,phone,data,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-    ).run(id, o.date, o.phone, JSON.stringify(o), now, now);
-    store.ordersChanged();
-    reply.code(201);
-    return get(id);
+    const key = req.headers["idempotency-key"];
+    if (key !== undefined) z.string().uuid().parse(key);
+    // Keep the original normalized request, independent of later account renames.
+    const payload = JSON.stringify(schema.parse(req.body));
+    const result = db.transaction(() => {
+      const previous = key
+        ? (db
+            .prepare("SELECT order_id,payload FROM order_requests WHERE key=?")
+            .get(key) as { order_id: string; payload: string } | undefined)
+        : undefined;
+      if (previous) {
+        if (previous.payload !== payload)
+          throw Object.assign(
+            new Error("Этот запрос уже использован для другого заказа."),
+            { statusCode: 409 },
+          );
+        return { order: get(previous.order_id), created: false };
+      }
+      const o = validate(req.body),
+        id = randomUUID(),
+        now = new Date().toISOString();
+      db.prepare(
+        "INSERT INTO orders(id,date,phone,data,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+      ).run(id, o.date, o.phone, JSON.stringify(o), now, now);
+      if (key)
+        db.prepare("INSERT INTO order_requests VALUES(?,?,?)").run(
+          key,
+          id,
+          payload,
+        );
+      return { order: get(id), created: true };
+    })();
+    if (result.created) store.ordersChanged();
+    return reply.code(result.created ? 201 : 200).send(result.order);
   });
   app.put<{ Params: { id: string } }>("/api/orders/:id", async (req) => {
     const existing = get(req.params.id);

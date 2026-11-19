@@ -23,6 +23,7 @@ export interface OrderInput {
   conversationId: string | null;
   client: string;
   source: string;
+  storeId?: "STOREBOOKS" | "MANGASTORE";
   date: string;
   phone: string;
   additionalPhone?: string;

@@ -1,3 +1,4 @@
+import { DraftSync } from "./draft-sync";
 const ArchiveSearch = lazy(() => import("./ArchiveSearch"));
 import { quickReplyHotkey, nextTemplateIndex } from "../shared/quick-replies";
 const SettingsView = lazy(() => import("./SettingsView"));
@@ -191,8 +192,7 @@ export default function App() {
   const [drafts, setDrafts] = useState<Record<string, string>>({}),
     [draftState, setDraftState] = useState(""),
     [historyLoading, setHistoryLoading] = useState(false);
-  const draftChain = useRef(Promise.resolve()),
-    sendLock = useRef(false),
+  const sendLock = useRef(false),
     pending = useRef<{ id: string; text: string; key: string } | null>(null),
     selectedRef = useRef(selected),
     bottom = useRef<HTMLDivElement>(null);
@@ -206,9 +206,24 @@ export default function App() {
   const followLatest = useRef(true);
   const chatScrollTop = useRef(0);
   selectedRef.current = selected;
-  const unsaved = useRef(new Map<string, { text: string; revision: number }>()),
-    draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null),
-    revisionCounter = useRef(0);
+  const [draftConflicts, setDraftConflicts] = useState<string[]>([]);
+  const draftSync = useRef<DraftSync | null>(null);
+  if (!draftSync.current)
+    draftSync.current = new DraftSync(async (id, value) => {
+      const response = await fetch(`/api/conversations/${id}/draft`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(value),
+      });
+      const data = await response.json();
+      if (!response.ok)
+        throw Object.assign(
+          new Error(data.error || "Не удалось сохранить черновик"),
+          { currentDraft: data.currentDraft },
+        );
+      return data;
+    });
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const report = useCallback(
     (e: unknown) =>
       setError(
@@ -285,6 +300,11 @@ export default function App() {
           ? undefined
           : old[deleted.conversationId],
     }));
+    setArchiveJobs((old) =>
+      old.map((job) =>
+        job.messageId === deleted.id ? { ...job, deleted: true } : job,
+      ),
+    );
     setEditing((old) => (old?.message.id === deleted.id ? null : old));
     setConversations((old) =>
       old.map((c) =>
@@ -353,8 +373,10 @@ export default function App() {
     setOwnerName(s.settings.ownerName ?? "Владелец");
     setDrafts((old) => {
       const next = { ...old };
-      for (const c of s.conversations)
-        if (!(c.id in next)) next[c.id] = c.draft;
+      for (const c of s.conversations) {
+        if (draftSync.current!.hydrate(c.id, c.draftVersion ?? 0))
+          next[c.id] = c.draft;
+      }
       return next;
     });
     setAuth(true);
@@ -642,25 +664,31 @@ export default function App() {
   }
   function flushDrafts() {
     if (draftTimer.current) clearTimeout(draftTimer.current);
-    for (const [id, value] of unsaved.current) {
-      draftChain.current = draftChain.current
-        .catch(() => {})
-        .then(() => api(`/conversations/${id}/draft`, "PUT", value))
-        .then(() => {
-          if (unsaved.current.get(id)?.revision === value.revision)
-            unsaved.current.delete(id);
-          setDraftState("Черновик сохранён");
-        })
-        .catch((e) => {
-          setDraftState("Черновик не сохранён");
-          report(e);
-        });
-    }
-    return draftChain.current;
+    return draftSync
+      .current!.flush()
+      .then(() => {
+        setDraftState(
+          draftSync.current!.pending.size ? "Сохранение…" : "Черновик сохранён",
+        );
+      })
+      .catch((error) => {
+        setDraftConflicts([...draftSync.current!.conflicts.keys()]);
+        setDraftState("Черновик не сохранён");
+        report(error);
+        throw error;
+      });
+  }
+  function resolveDraft(keepLocal: boolean) {
+    if (!selected) return;
+    const remote = draftSync.current!.resolve(selected, keepLocal);
+    setDraftConflicts([...draftSync.current!.conflicts.keys()]);
+    if (!keepLocal && remote)
+      setDrafts((old) => ({ ...old, [selected]: remote.text }));
+    else void flushDrafts().catch(() => {});
   }
   useEffect(() => {
     const flush = () => {
-      for (const [id, value] of unsaved.current)
+      for (const [id, value] of draftSync.current!.pending)
         void fetch(`/api/conversations/${id}/draft`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -682,13 +710,13 @@ export default function App() {
     if (!selected) return;
     const id = selected;
     setDrafts((d) => ({ ...d, [id]: text }));
-    unsaved.current.set(id, {
-      text,
-      revision: Date.now() * 1000 + (revisionCounter.current++ % 1000),
-    });
+    draftSync.current!.edit(id, text);
     setDraftState("Сохранение…");
     if (draftTimer.current) clearTimeout(draftTimer.current);
-    draftTimer.current = setTimeout(() => void flushDrafts(), 250);
+    draftTimer.current = setTimeout(
+      () => void flushDrafts().catch(() => {}),
+      250,
+    );
   }
   const sentFocus = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -1381,6 +1409,20 @@ export default function App() {
                   </div>
                 </div>
                 <div className="composer-wrap">
+                  {draftConflicts.includes(c.id) && (
+                    <div role="alert" className="draft-conflict">
+                      <p>
+                        Черновик изменён на другом устройстве. Ваш текст
+                        остаётся в поле.
+                      </p>
+                      <button type="button" onClick={() => resolveDraft(true)}>
+                        Сохранить мой вариант
+                      </button>
+                      <button type="button" onClick={() => resolveDraft(false)}>
+                        Взять вариант с сервера
+                      </button>
+                    </div>
+                  )}
                   <div className="reply-account">
                     <span className={"platform " + a.platform}>
                       <PlatformIcon platform={a.platform} />
@@ -1517,9 +1559,12 @@ export default function App() {
                         onKeyDown={(e) => {
                           if (
                             templatesOpen &&
-                            ["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(
-                              e.key,
-                            )
+                            [
+                              "ArrowDown",
+                              "ArrowUp",
+                              "Enter",
+                              "Escape",
+                            ].includes(e.key)
                           ) {
                             e.preventDefault();
                             if (e.key === "Escape") setTemplatesOpen(false);
@@ -1723,6 +1768,7 @@ export default function App() {
             sendingEntries={archiveJobs
               .filter(
                 (j) =>
+                  !j.deleted &&
                   j.conversationId === c?.id &&
                   ["preparing", "queued", "sending"].includes(j.state),
               )

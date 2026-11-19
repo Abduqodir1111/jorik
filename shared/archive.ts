@@ -17,6 +17,7 @@ export interface ArchiveFolderContents {
   nextOffset: number | null;
 }
 export interface ArchiveJob {
+  deleted?: boolean;
   conversationId?: string;
   entryId?: string;
   clientKey?: string;

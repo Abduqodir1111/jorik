@@ -198,14 +198,16 @@ test("Order mutations notify only the orders stream, rather than forcing chat re
     ).json();
     assert.equal(ordersChanged, 1);
     const baseline = changed;
-    await ctx.app.inject({
+    const refusal = await ctx.app.inject({
       method: "PATCH",
       url: `/api/orders/${original.id}/refused`,
+      headers: { "If-Match": JSON.stringify(original.updatedAt) },
       payload: { refused: true },
     });
     await ctx.app.inject({
       method: "DELETE",
       url: `/api/orders/${original.id}`,
+      headers: { "If-Match": JSON.stringify(refusal.json().updatedAt) },
     });
     assert.equal(ordersChanged, 3);
     assert.equal(changed, baseline);

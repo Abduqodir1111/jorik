@@ -74,6 +74,7 @@ test("Additional phone is optional, validated, persists across restart, removabl
     const changed = await ctx.app.inject({
       method: "PUT",
       url: "/api/orders/" + extra.id,
+      headers: { "If-Match": JSON.stringify(extra.updatedAt) },
       payload: { ...input, additionalPhone: "" },
     });
     assert.equal(changed.statusCode, 200);

@@ -28,12 +28,14 @@ async function request<T>(
   method = "GET",
   body?: unknown,
   version?: string,
+  idempotencyKey?: string,
 ): Promise<T> {
   const r = await fetch("/api/orders" + route, {
     method,
     headers: {
       ...(body ? { "Content-Type": "application/json" } : {}),
       ...(version ? { "If-Match": JSON.stringify(version) } : {}),
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -110,6 +112,8 @@ export default function Orders({
   const [advanced, setAdvanced] = useState(false);
   const [exportDay, setExportDay] = useState<string | null>(null);
   const exportLock = useRef(false);
+  const createAttempt = useRef<{ payload: string; key: string } | null>(null);
+  const saveLock = useRef(false);
   const [ordersLoaded, setOrdersLoaded] = useState(false);
   const autoPhone = useRef(false);
   const [amount, setAmount] = useState(""),
@@ -157,6 +161,7 @@ export default function Orders({
         ctx ??
           (linked && account ? { conversation: linked, account } : undefined),
       );
+      createAttempt.current = null;
       setEditing(order ?? null);
       setForm(order ? { ...order } : blank(ctx));
       setAmount(order ? String(order.amount) : "");
@@ -217,7 +222,8 @@ export default function Orders({
     !!form.items.trim() &&
     (form.deliveryType !== "delivery" || !!form.district);
   async function save() {
-    if (!valid || !form || busy) return;
+    if (!valid || !form || busy || saveLock.current) return;
+    saveLock.current = true;
     setBusy(true);
     setError("");
     try {
@@ -250,17 +256,22 @@ export default function Orders({
         items,
         amount: Number(amount),
       };
+      const payload = JSON.stringify(body);
+      if (!editing && createAttempt.current?.payload !== payload)
+        createAttempt.current = { payload, key: crypto.randomUUID() };
       await request(
         editing ? "/" + editing.id : "",
         editing ? "PUT" : "POST",
         body,
         editing?.updatedAt,
+        editing ? undefined : createAttempt.current!.key,
       );
       await load();
       close();
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      saveLock.current = false;
       setBusy(false);
     }
   }

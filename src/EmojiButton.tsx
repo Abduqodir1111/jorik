@@ -39,6 +39,7 @@ export default function EmojiButton({
     panel = useRef<HTMLDivElement>(null);
   const range = useRef({ start: value.length, end: value.length });
   const pendingCaret = useRef<number | null>(null);
+  const keyboardOpen = useRef(false);
   const search = useRef<HTMLInputElement>(null);
   function close(restore = false) {
     setOpen(false);
@@ -46,6 +47,7 @@ export default function EmojiButton({
   }
   useLayoutEffect(() => {
     if (pendingCaret.current === null || !input.current) return;
+    if (innerWidth >= 768) input.current.focus({ preventScroll: true });
     input.current.setSelectionRange(pendingCaret.current, pendingCaret.current);
     pendingCaret.current = null;
   }, [value, input]);
@@ -118,9 +120,9 @@ export default function EmojiButton({
     if (!open || !positionReady) return;
     // Focus only after the measured panel is visible. Avoid opening the
     // software keyboard just to choose an emoji on a phone.
-    (innerWidth >= 768 ? search.current : panel.current)?.focus({
-      preventScroll: true,
-    });
+    if (innerWidth < 768) panel.current?.focus({ preventScroll: true });
+    else if (keyboardOpen.current)
+      search.current?.focus({ preventScroll: true });
   }, [open, positionReady]);
   useEffect(() => {
     if (!open) return;
@@ -156,13 +158,14 @@ export default function EmojiButton({
     const textarea = input.current;
     if (disabled || !textarea || textarea.readOnly) return;
     const next = insertEmoji(
-      textarea.value,
+      value,
       range.current.start,
       range.current.end,
       emoji,
     );
     range.current = { start: next.caret, end: next.caret };
-    if (next.text === textarea.value) {
+    if (next.text === value) {
+      if (innerWidth >= 768) textarea.focus({ preventScroll: true });
       textarea.setSelectionRange(next.caret, next.caret);
       return;
     }
@@ -182,7 +185,7 @@ export default function EmojiButton({
         aria-haspopup="dialog"
         disabled={disabled}
         onPointerDown={(event) => event.preventDefault()}
-        onClick={() => {
+        onClick={(event) => {
           if (open) {
             close(true);
             return;
@@ -192,6 +195,10 @@ export default function EmojiButton({
             start: textarea?.selectionStart ?? value.length,
             end: textarea?.selectionEnd ?? value.length,
           };
+          keyboardOpen.current = event.detail === 0;
+          if (innerWidth >= 768 && !keyboardOpen.current)
+            textarea?.focus({ preventScroll: true });
+          setPosition(undefined);
           setQuery("");
           onOpen?.();
           setOpen(true);
@@ -286,6 +293,7 @@ export default function EmojiButton({
                   type="button"
                   aria-label={item.emoji + " " + item.label}
                   title={item.label}
+                  onPointerDown={(event) => event.preventDefault()}
                   onClick={() => select(item.emoji)}
                 >
                   {item.emoji}
