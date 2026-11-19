@@ -26,6 +26,32 @@ const labels = {
   error: "Ошибка",
   unknown: "Результат неизвестен",
 };
+function imagesOnly(message: Message) {
+  return (
+    message.attachments.length > 0 &&
+    message.attachments.every((a) => a.kind === "image")
+  );
+}
+function photoLabel(message: Message) {
+  return (
+    imagesOnly(message) &&
+    /^(?:Фотография|Изображение|Фото|Фото Instagram|Фото Telegram)$/i.test(
+      message.text.trim(),
+    )
+  );
+}
+function photoOnly(message: Message) {
+  return (
+    imagesOnly(message) &&
+    (!message.text.trim() || photoLabel(message)) &&
+    !message.reply_to &&
+    !message.replyToId &&
+    !message.error &&
+    !message.reactions?.length &&
+    message.status !== "error" &&
+    message.status !== "unknown"
+  );
+}
 export default memo(function MessageTimeline({
   messages,
   platform,
@@ -159,6 +185,7 @@ export default memo(function MessageTimeline({
               }}
               className={
                 "bubble " +
+                (photoOnly(m) ? "photo-only " : "") +
                 (canSwipeReply(m) ? "swipe-reply-enabled " : "") +
                 (m.attachments.some((a) => a.kind === "sticker")
                   ? "sticker-bubble "
@@ -236,6 +263,8 @@ export default memo(function MessageTimeline({
                   )}
                 </div>
               ) : (
+                !!m.text.trim() &&
+                !photoLabel(m) &&
                 !m.attachments.some(
                   (a) =>
                     ["sticker", "voice", "location"].includes(a.kind) &&

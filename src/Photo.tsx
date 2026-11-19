@@ -6,6 +6,7 @@ export default function Photo({ attachment }: { attachment: Attachment }) {
     [viewing, setViewing] = useState(false),
     [loaded, setLoaded] = useState(false),
     [attempt, setAttempt] = useState(0);
+  const [previewWidth, setPreviewWidth] = useState<number>();
   const dialog = useRef<HTMLDialogElement>(null);
   const url =
     attachment.url +
@@ -17,6 +18,7 @@ export default function Photo({ attachment }: { attachment: Attachment }) {
       {!error ? (
         <button
           className="photo-preview"
+          style={{ width: previewWidth }}
           aria-label={"Открыть фото: " + attachment.name}
           onClick={() => {
             setViewing(true);
@@ -35,12 +37,19 @@ export default function Photo({ attachment }: { attachment: Attachment }) {
             src={url}
             alt={attachment.name}
             loading="lazy"
-            onLoad={() => setLoaded(true)}
+            onLoad={(event) => {
+              const image = event.currentTarget;
+              setPreviewWidth(
+                Math.min(
+                  320,
+                  image.naturalWidth,
+                  (320 * image.naturalWidth) / image.naturalHeight,
+                ),
+              );
+              setLoaded(true);
+            }}
             onError={() => setError(true)}
           />
-          {loaded && (
-            <span className="photo-enlarge">Нажмите, чтобы увеличить</span>
-          )}
         </button>
       ) : (
         <div className="photo-error">

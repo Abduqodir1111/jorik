@@ -1,0 +1,43 @@
+/* A photo without a caption uses the image itself as the message surface. */
+.inbox-page .message-row .bubble.photo-only {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.photo-only .photo-attachment {
+  margin: 0;
+}
+.photo-only .photo-preview {
+  background: transparent;
+  border: 0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.photo-only .photo-preview .attachment-image {
+  border-radius: 12px;
+}
+.inbox-page .message-row .bubble.photo-only:not(.failed) .message-meta {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  margin: 0;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 50%);
+  color: #fff;
+  opacity: 1;
+  pointer-events: none;
+}
+/* Keep load failures and their retry button readable. */
+.photo-only .photo-error {
+  background: var(--surface);
+}
+.inbox-page .message-row .bubble.photo-only:not(.failed):has(.photo-error) .message-meta {
+  position: static;
+  margin: 4px 0 0;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+}
