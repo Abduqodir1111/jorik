@@ -1,3 +1,4 @@
+import { useModalFocus } from "./use-modal-focus";
 import { useEffect, useRef, useState } from "react";
 import { Trash2, X, RotateCcw } from "lucide-react";
 import type { Conversation } from "../shared/types";
@@ -22,9 +23,7 @@ export function ConversationActions({
     lock = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
+  useModalFocus(dialog);
   return (
     <dialog
       ref={dialog}
@@ -87,9 +86,9 @@ export function DeleteConversationDialog({
   }>();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  useModalFocus(dialog);
   useEffect(() => {
     const controller = new AbortController();
-    dialog.current?.showModal();
     request<typeof preview>(`/${conversation.id}/deletion-preview`, {
       signal: controller.signal,
     })

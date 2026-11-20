@@ -117,6 +117,8 @@ export default function Orders({
   const [ordersLoaded, setOrdersLoaded] = useState(false);
   const autoPhone = useRef(false);
   const opening = useRef(false);
+  const formOrigin = useRef<HTMLElement | null>(null);
+  const initialForm = useRef("");
   const [amount, setAmount] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -152,6 +154,10 @@ export default function Orders({
     async (order?: Order, ctx?: OrderContext) => {
       if (form || opening.current) return;
       opening.current = true;
+      formOrigin.current =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
       try {
         autoPhone.current = false;
         let linked = order?.conversationId
@@ -177,7 +183,12 @@ export default function Orders({
         );
         createAttempt.current = null;
         setEditing(order ?? null);
-        setForm(order ? { ...order } : blank(ctx));
+        const initial = order ? { ...order } : blank(ctx);
+        initialForm.current = JSON.stringify({
+          form: initial,
+          amount: order ? String(order.amount) : "",
+        });
+        setForm(initial);
         setAmount(order ? String(order.amount) : "");
         setError("");
         setHistory(false);
@@ -205,10 +216,39 @@ export default function Orders({
   useEffect(() => {
     if (closeRequest) close();
   }, [closeRequest]);
+  useEffect(() => {
+    if (!form) return;
+    const escape = (event: KeyboardEvent) => {
+      if (
+        event.key !== "Escape" ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        busy ||
+        document.querySelector("dialog[open]")
+      )
+        return;
+      event.preventDefault();
+      const changed = JSON.stringify({ form, amount }) !== initialForm.current;
+      if (
+        changed &&
+        !window.confirm(
+          "Закрыть форму заказа? Несохранённые данные будут потеряны.",
+        )
+      )
+        return;
+      close();
+    };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, [form, amount, busy]);
   function close() {
     setForm(null);
     setHistory(false);
     onCloseRequest();
+    const origin = formOrigin.current;
+    requestAnimationFrame(() => {
+      if (origin?.isConnected) origin.focus({ preventScroll: true });
+    });
   }
   useEffect(() => {
     if (!form?.conversationId || editing || !ordersLoaded || autoPhone.current)

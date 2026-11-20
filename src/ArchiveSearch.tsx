@@ -395,6 +395,12 @@ export default function ArchiveSearch({
                 </div>
               </article>
             ))}
+            {!loading && entries.length >= 15 && (
+              <p className="archive-hint" role="status">
+                Показаны первые 15 результатов. Уточните название, чтобы найти
+                остальные.
+              </p>
+            )}
             {!loading && q.trim().length >= 2 && !entries.length && (
               <p className="archive-hint">В локальном архиве совпадений нет.</p>
             )}

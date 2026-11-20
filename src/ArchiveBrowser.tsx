@@ -1,3 +1,4 @@
+import { useModalFocus } from "./use-modal-focus";
 import { useArchivePdfPages, pdfPagesLabel } from "./useArchivePdfPages";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -126,11 +127,7 @@ export default function ArchiveBrowser({
       controller.abort();
     };
   }, [pdfUrl, pdfRetry]);
-  useEffect(() => {
-    const element = dialog.current;
-    element?.showModal();
-    return () => element?.close();
-  }, []);
+  useModalFocus(dialog);
   useEffect(() => {
     if (entry.type !== "folder") return;
     const controller = new AbortController();
