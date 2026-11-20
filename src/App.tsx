@@ -1,3 +1,7 @@
+import {
+  ConversationActions,
+  DeleteConversationDialog,
+} from "./ConversationTrash";
 import { DraftSync } from "./draft-sync";
 const ArchiveSearch = lazy(() => import("./ArchiveSearch"));
 import { quickReplyHotkey, nextTemplateIndex } from "../shared/quick-replies";
@@ -142,6 +146,12 @@ export default function App() {
     [messages, setMessages] = useState<Message[]>([]),
     [selected, setSelected] = useState<string | null>(null),
     [page, setPage] = useState("inbox");
+  const [deletionTarget, setDeletionTarget] = useState<Conversation | null>(
+    null,
+  );
+  const [conversationMenu, setConversationMenu] = useState<Conversation | null>(
+    null,
+  );
   const [archiveJobs, setArchiveJobs] = useState<ArchiveJob[]>([]);
   const acceptArchiveJobs = useCallback((jobs: ArchiveJob[]) => {
     for (const job of jobs)
@@ -364,6 +374,17 @@ export default function App() {
       } catch {}
       chatCache.current = new ChatCache(s.mode, storage);
       cacheMode.current = s.mode;
+    }
+    const visibleIds = new Set<string>(
+      s.conversations.map((item: Conversation) => item.id),
+    );
+    chatCache.current?.retain(visibleIds);
+    setConversationMenu((old) => (old && !visibleIds.has(old.id) ? null : old));
+    if (selectedRef.current && !visibleIds.has(selectedRef.current)) {
+      selectedRef.current = null;
+      setSelected(null);
+      setInfo(false);
+      setDeletionTarget(null);
     }
     hydrate(s.settings.quickReplies, s.quickRepliesVersion);
     setAccounts((old) => reconcileList(old, s.accounts));
@@ -1185,6 +1206,7 @@ export default function App() {
                     selected={selected === c.id}
                     draft={drafts[c.id] ?? ""}
                     onSelect={selectConversation}
+                    onOpenMenu={setConversationMenu}
                   />
                 ) : null;
               })}
@@ -1741,6 +1763,18 @@ export default function App() {
               >
                 Отметить непрочитанным
               </button>
+              <button
+                type="button"
+                className="secondary conversation-delete"
+                onClick={() =>
+                  void action(async () => {
+                    await flushDrafts();
+                    setDeletionTarget(c);
+                  })
+                }
+              >
+                Удалить диалог
+              </button>
               <small>
                 Прочтение и ответы синхронизируются с подключёнными аккаунтами;
                 возможности Instagram зависят от событий Meta.
@@ -1748,6 +1782,29 @@ export default function App() {
             </aside>
           )}
         </div>
+        {conversationMenu && (
+          <ConversationActions
+            conversation={conversationMenu}
+            onClose={() => setConversationMenu(null)}
+            onDelete={async () => {
+              await flushDrafts();
+              setConversationMenu(null);
+              setDeletionTarget(conversationMenu);
+            }}
+          />
+        )}
+        {deletionTarget && (
+          <DeleteConversationDialog
+            conversation={deletionTarget}
+            onClose={() => setDeletionTarget(null)}
+            onDeleted={() => {
+              setDeletionTarget(null);
+              setSelected(null);
+              setInfo(false);
+              void refresh().catch(report);
+            }}
+          />
+        )}
         <Suspense fallback={null}>
           <Orders
             accounts={accounts}

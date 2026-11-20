@@ -9,6 +9,16 @@ const message = (id: string) =>
     attachments: [],
     text: "saved",
   }) as unknown as Message;
+test("Deleted chats are removed from persistent cache without losing visible histories", () => {
+  const disk = storage(),
+    cache = new ChatCache("demo", disk);
+  cache.put("visible", [message("visible")]);
+  cache.put("deleted", [message("deleted")]);
+  cache.retain(new Set(["visible"]));
+  const restored = new ChatCache("demo", disk);
+  assert.equal(restored.get("deleted"), undefined);
+  assert.equal(restored.get("visible")?.messages[0].text, "saved");
+});
 function storage() {
   const data = new Map<string, string>();
   return {

@@ -116,6 +116,7 @@ export default function Orders({
   const saveLock = useRef(false);
   const [ordersLoaded, setOrdersLoaded] = useState(false);
   const autoPhone = useRef(false);
+  const opening = useRef(false);
   const [amount, setAmount] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -148,25 +149,43 @@ export default function Orders({
     };
   }, [visible, !!form, load]);
   const open = useCallback(
-    (order?: Order, ctx?: OrderContext) => {
-      if (form) return;
-      autoPhone.current = false;
-      const linked = order?.conversationId
-        ? conversations.find((c) => c.id === order.conversationId)
-        : undefined;
-      const account = linked
-        ? accounts.find((a) => a.id === linked.accountId)
-        : undefined;
-      setFormContext(
-        ctx ??
-          (linked && account ? { conversation: linked, account } : undefined),
-      );
-      createAttempt.current = null;
-      setEditing(order ?? null);
-      setForm(order ? { ...order } : blank(ctx));
-      setAmount(order ? String(order.amount) : "");
-      setError("");
-      setHistory(false);
+    async (order?: Order, ctx?: OrderContext) => {
+      if (form || opening.current) return;
+      opening.current = true;
+      try {
+        autoPhone.current = false;
+        let linked = order?.conversationId
+          ? conversations.find((c) => c.id === order.conversationId)
+          : undefined;
+        if (order?.conversationId && !linked) {
+          const response = await fetch(
+            "/api/conversations/" + order.conversationId,
+          );
+          const data = await response.json();
+          if (!response.ok)
+            throw new Error(
+              data.error || "Не удалось загрузить клиента заказа",
+            );
+          linked = data as Conversation;
+        }
+        const account = linked
+          ? accounts.find((a) => a.id === linked.accountId)
+          : undefined;
+        setFormContext(
+          ctx ??
+            (linked && account ? { conversation: linked, account } : undefined),
+        );
+        createAttempt.current = null;
+        setEditing(order ?? null);
+        setForm(order ? { ...order } : blank(ctx));
+        setAmount(order ? String(order.amount) : "");
+        setError("");
+        setHistory(false);
+      } catch (error) {
+        setError((error as Error).message);
+      } finally {
+        opening.current = false;
+      }
     },
     [!!form, conversations, accounts],
   );

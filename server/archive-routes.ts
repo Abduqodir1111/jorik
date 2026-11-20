@@ -319,6 +319,11 @@ export function registerArchive(
     }
     const c = store.conversation(b.conversationId),
       a = store.account(c.accountId);
+    if (c.deletedAt)
+      throw Object.assign(
+        new Error("Сначала восстановите удалённый диалог в настройках."),
+        { statusCode: 409 },
+      );
     const preview = {
       id: "",
       conversationId: c.id,
@@ -332,6 +337,11 @@ export function registerArchive(
     };
     store.resolveAdapter(a).validateReply(a, preview);
     const entry = await index.get(b.id, "video");
+    if (store.conversation(c.id).deletedAt)
+      throw Object.assign(
+        new Error("Сначала восстановите удалённый диалог в настройках."),
+        { statusCode: 409 },
+      );
     // index.get touches disk: another request may have inserted the same intent
     // during that await. Recheck before the synchronous insert.
     const raced = store.db

@@ -105,7 +105,7 @@ export class PushService {
       c.name,c.username,a.name AS accountName,m.text FROM push_jobs j
       JOIN push_subscriptions p ON p.endpoint=j.endpoint JOIN messages m ON m.id=j.message_id
       JOIN conversations c ON c.id=m.conversation_id JOIN accounts a ON a.id=c.account_id
-      WHERE j.next_attempt<=? ORDER BY j.next_attempt LIMIT 10`,
+      WHERE c.deleted_at IS NULL AND j.next_attempt<=? ORDER BY j.next_attempt LIMIT 10`,
       )
       .all(Date.now()) as Array<{
       message_id: string;

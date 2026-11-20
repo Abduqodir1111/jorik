@@ -13,7 +13,7 @@ import {
   type IncomingEvent,
   type Adapter,
 } from "./adapters.js";
-const conversationSelect = `SELECT c.id,c.account_id AS accountId,c.external_id AS externalId,c.name,c.username,c.stage,c.unread,(c.unread>0) AS needsReply,c.updated_at AS updatedAt,c.draft,c.draft_version AS draftVersion,(SELECT MAX(created_at) FROM messages WHERE conversation_id=c.id AND direction='in') AS lastIncomingAt,COALESCE((SELECT text FROM messages WHERE conversation_id=c.id AND deleted_at IS NULL ORDER BY created_at DESC,rowid DESC LIMIT 1),'') AS preview FROM conversations c`;
+const conversationSelect = `SELECT c.id,c.account_id AS accountId,c.external_id AS externalId,c.name,c.username,c.stage,c.unread,(c.unread>0) AS needsReply,c.updated_at AS updatedAt,c.draft,c.draft_version AS draftVersion,c.deleted_at AS deletedAt,(SELECT MAX(created_at) FROM messages WHERE conversation_id=c.id AND direction='in') AS lastIncomingAt,COALESCE((SELECT text FROM messages WHERE conversation_id=c.id AND deleted_at IS NULL ORDER BY created_at DESC,rowid DESC LIMIT 1),'') AS preview FROM conversations c`;
 export class Store {
   constructor(
     public db: DB,
@@ -53,7 +53,10 @@ export class Store {
   conversations(): Conversation[] {
     return (
       this.db
-        .prepare(conversationSelect + " ORDER BY c.updated_at DESC")
+        .prepare(
+          conversationSelect +
+            " WHERE c.deleted_at IS NULL ORDER BY c.updated_at DESC",
+        )
         .all() as Conversation[]
     ).map((c) => ({ ...c, needsReply: c.unread > 0 }));
   }
@@ -62,6 +65,18 @@ export class Store {
       Conversation | undefined;
     if (!c) throw new Error("Диалог не найден");
     return { ...c, needsReply: c.unread > 0 };
+  }
+  revealForIncoming(id: string, createdAt: string, live = false) {
+    const timestamp = Date.parse(createdAt);
+    if (!Number.isFinite(timestamp)) return;
+    // Telegram event times have one-second precision. Only live events get
+    // this tolerance; replaying old archive pages must not restore a chat.
+    const boundary = new Date(timestamp + (live ? 999 : 0)).toISOString();
+    this.db
+      .prepare(
+        "UPDATE conversations SET deleted_at=NULL,visibility_version=visibility_version+1 WHERE id=? AND deleted_at IS NOT NULL AND deleted_at<=?",
+      )
+      .run(id, boundary);
   }
   message(conversationId: string, messageId: string): Message | undefined {
     return this.readMessages(conversationId, undefined, messageId)[0];
@@ -220,6 +235,7 @@ export class Store {
         )
         .run(messageId, c.id, e.externalMessageId, e.text, now);
       if (r.changes) {
+        this.revealForIncoming(c.id, now);
         notification = { conversationId: c.id, messageId };
         this.db
           .prepare(
@@ -248,6 +264,11 @@ export class Store {
     } = {},
   ) {
     const c = this.conversation(id);
+    if (c.deletedAt)
+      throw Object.assign(
+        new Error("Сначала восстановите удалённый диалог в настройках."),
+        { statusCode: 409 },
+      );
     return this.db.transaction(() => {
       const existing = this.db
         .prepare(

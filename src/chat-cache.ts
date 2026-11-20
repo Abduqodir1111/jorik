@@ -78,6 +78,16 @@ export class ChatCache {
       /* Keep the in-memory cache when browser storage is full. */
     }
   }
+  retain(ids: Set<string>) {
+    let changed = false;
+    for (const id of this.entries.keys())
+      if (!ids.has(id)) {
+        this.entries.delete(id);
+        this.serialized.delete(id);
+        changed = true;
+      }
+    if (changed) this.save();
+  }
   clear() {
     this.entries.clear();
     this.serialized.clear();

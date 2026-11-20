@@ -1,3 +1,4 @@
+import ConversationTrash from "./ConversationTrash";
 import { useState, type ReactNode } from "react";
 import { Plus, Trash2, Check, LogOut, Volume2, Sun, Moon, Save, Server, Users, ChevronDown } from "lucide-react";
 import { useOperator } from "./OperatorContext";
@@ -318,6 +319,7 @@ export default function SettingsView({
           </p>
           {saveButton("Сохранить все настройки")}
         </footer>
+        <ConversationTrash />
         {onLogout && <section className="settings-card settings-session-card" aria-label="Выход из аккаунта">
           <p>Приём сообщений продолжится на сервере после выхода.</p>
           <button type="button" className="settings-logout" onClick={onLogout}>

@@ -3,6 +3,7 @@ import { registerArchive, type ArchiveOptions } from "./archive-routes.js";
 import { MAX_QUICK_REPLIES } from "../shared/quick-replies.js";
 import { registerProfilePhotos } from "./profile-photos.js";
 import { PushService, loadVapid, type PushOptions } from "./push.js";
+import { registerConversationTrash } from "./conversation-trash.js";
 import { registerOrders } from "./orders.js";
 import { imageMime } from "./telegram-photos.js";
 import { registerMetaWebhook } from "./meta-webhook.js";
@@ -688,7 +689,12 @@ export async function createApp(opts: {
   app.put<{ Params: { id: string } }>(
     "/api/conversations/:id/draft",
     async (req, reply) => {
-      store.conversation(req.params.id);
+      if (store.conversation(req.params.id).deletedAt)
+        return reply
+          .code(409)
+          .send({
+            error: "Сначала восстановите удалённый диалог в настройках.",
+          });
       const body = z
         .object({
           text: z.string().max(10000),
@@ -702,11 +708,9 @@ export async function createApp(opts: {
         })
         .parse(req.body);
       if (body.version === undefined || !body.key)
-        return reply
-          .code(428)
-          .send({
-            error: "Обновите страницу для безопасного сохранения черновиков.",
-          });
+        return reply.code(428).send({
+          error: "Обновите страницу для безопасного сохранения черновиков.",
+        });
       const result = db.transaction(() => {
         const current = db
           .prepare(
@@ -737,6 +741,7 @@ export async function createApp(opts: {
   );
   const archive = registerArchive(app, store, opts.dataDir, opts.archive);
   registerOrders(app, store);
+  registerConversationTrash(app, store);
   registerProfilePhotos(app, store, async (id) => {
     const c = store.conversation(id),
       a = store.account(c.accountId);

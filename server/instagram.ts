@@ -338,6 +338,12 @@ export class InstagramIntegration {
                 created.toISOString(),
                 key,
               );
+        if (inserted.changes && !out)
+          this.store.revealForIncoming(
+            id,
+            created.toISOString(),
+            notifyMessage,
+          );
         const saved =
           previous ??
           (db

@@ -803,6 +803,8 @@ export class TelegramIntegration {
         );
       insertedIncoming =
         !!r.changes && unread && !m.out && m.id > c.telegram_read_inbox_max_id;
+      if (r.changes && !m.out)
+        this.store.revealForIncoming(c.id, createdAt, unread && !edited);
       if (r.changes)
         this.store.db
           .prepare(

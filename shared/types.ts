@@ -44,6 +44,7 @@ export interface Conversation {
   preview: string;
   draft: string;
   draftVersion?: number;
+  deletedAt?: string | null;
 }
 export interface Attachment {
   address?: string;
