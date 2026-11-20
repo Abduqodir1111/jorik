@@ -1105,7 +1105,9 @@ export default function App() {
         </div>
       </aside>
       <main>
-        <header className="topbar">
+        <header
+          className={page === "orders" ? "topbar orders-topbar" : "topbar"}
+        >
           <div>
             <span className="breadcrumb">Рабочее пространство</span>
             <span className="slash">/</span>
@@ -1300,7 +1302,6 @@ export default function App() {
                       </h2>
                       <StoreBadge name={a.name} color={a.color} />
                     </div>
-                    <small>Диалог через {a.name}</small>
                     {a.adapter === "instagram-graph" && (
                       <span
                         className={
@@ -1315,14 +1316,6 @@ export default function App() {
                       </span>
                     )}
                   </div>
-                  <button
-                    className="icon mark-unread"
-                    title="Отметить непрочитанным"
-                    aria-label="Отметить непрочитанным"
-                    onClick={() => void markUnread(c.id)}
-                  >
-                    <Mail size={20} />
-                  </button>
                   <button
                     className="icon create-order"
                     title="Создать заказ"
@@ -1373,10 +1366,14 @@ export default function App() {
                     <option value="paid">Оплачен</option>
                     <option value="waiting">Ждёт</option>
                   </select>
-                  <span className={"platform " + a.platform}>
-                    <PlatformIcon platform={a.platform} />
-                  </span>
-                  Диалог через <b style={{ color: a.color }}>{a.name}</b>
+                  <button
+                    className="icon mark-unread"
+                    title="Отметить непрочитанным"
+                    aria-label="Отметить непрочитанным"
+                    onClick={() => void markUnread(c.id)}
+                  >
+                    <Mail size={20} />
+                  </button>
                   <span className="context-right">
                     {a.state === "connected"
                       ? "Подключено"
@@ -1466,7 +1463,7 @@ export default function App() {
                       <PlatformIcon platform={a.platform} />
                     </span>
                     Ответ от{" "}
-                    <b style={{ color: a.color }}>
+                    <b>
                       {a.platform === "telegram" ? "Telegram" : "Instagram"} ·{" "}
                       {a.name}
                     </b>

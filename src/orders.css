@@ -58,10 +58,36 @@
 }
 .orders-heading h1 {
   margin: 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .orders-heading h1 small {
   font-size: 16px;
   color: var(--muted);
+}
+@media (max-width:767px) {
+  .app main > .topbar.orders-topbar { display:none; }
+  .orders-page .orders-heading {
+    flex-direction:column;
+    align-items:stretch;
+    gap:10px;
+  }
+  .orders-page .orders-heading h1 { margin:0; }
+  .orders-page .orders-heading-actions {
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    width:100%;
+  }
+  .orders-page .orders-heading-actions button {
+    min-width:0;
+    min-height:44px;
+    justify-content:center;
+  }
+  .orders-page .orders-heading-actions button:not(.primary) {
+    font-size:13px;
+    padding:8px 10px;
+  }
 }
 .orders-heading p {
   color: var(--muted);

@@ -363,7 +363,6 @@ export default function Orders({
         <section className="orders-page page-content">
           <header className="orders-heading">
             <div>
-              <span className="eyebrow">МИНИ-CRM</span>
               <h1>
                 Заказы <small>{orders.length}</small>
               </h1>

@@ -192,3 +192,43 @@
 .dark .out .bubble .message-error { color: var(--text-primary); }
 .dark .unread { background: var(--bubble-out-bg); color: var(--bubble-out-text); }
 .dark .list-heading h1 > span { background: var(--bg-elevated); color: var(--text-primary); }
+
+/* Keep all filters discoverable in the narrow desktop conversation column. */
+.inbox-page .inbox-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: visible;
+}
+.inbox-page .inbox-filters button { min-width: 0; }
+.inbox-page .reply-account > b { color: var(--ink); }
+.dark .inbox-page .reply-account > b { color: var(--text-primary); }
+
+@media (max-width: 767px) {
+  .inbox-page .chat-header { gap: 4px; padding-inline: 8px; }
+  .inbox-page .chat-header .back,
+  .inbox-page .chat-header .icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 44px;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 8px;
+  }
+  .inbox-page .chat-context { padding: 4px 10px; }
+  .inbox-page .chat-context .stage-select,
+  .inbox-page .chat-context .mark-unread { min-height: 44px; }
+  .inbox-page .chat-context .mark-unread {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    padding: 8px;
+  }
+  .inbox-page .inbox-filters button { min-height: 44px; }
+}
+@media (min-width: 360px) and (max-width: 767px) {
+  .inbox-page .inbox-filters { display: flex; flex-wrap: nowrap; }
+}

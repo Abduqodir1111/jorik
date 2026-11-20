@@ -90,7 +90,6 @@ export default function CompactOrderForm({
         onSave();
       }}
     >
-      <div className="sheet-handle" aria-hidden="true" />
       <header>
         <div>
           <span className="eyebrow">

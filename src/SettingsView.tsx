@@ -1,6 +1,18 @@
 import ConversationTrash from "./ConversationTrash";
 import { useState, type ReactNode } from "react";
-import { Plus, Trash2, Check, LogOut, Volume2, Sun, Moon, Save, Server, Users, ChevronDown } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Check,
+  LogOut,
+  Volume2,
+  Sun,
+  Moon,
+  Save,
+  Server,
+  Users,
+  ChevronDown,
+} from "lucide-react";
 import { useOperator } from "./OperatorContext";
 import type { Mode } from "../shared/types";
 import "./settings-view.css";
@@ -47,6 +59,7 @@ export default function SettingsView({
     saveStatus,
     saveSlots,
   } = useOperator();
+  const [retrying, setRetrying] = useState(false);
   const [name, setName] = useState(ownerName),
     [busy, setBusy] = useState(false),
     [result, setResult] = useState("");
@@ -59,9 +72,8 @@ export default function SettingsView({
     setBusy(true);
     setResult("");
     try {
-      await saveSlots();
       await onSaveOwner(name.trim());
-      setResult("Все настройки сохранены");
+      setResult("Имя сохранено");
     } catch (e) {
       setResult(
         e instanceof Error ? e.message : "Не удалось сохранить настройки",
@@ -92,7 +104,6 @@ export default function SettingsView({
               Управление диалогами, быстрыми ответами и рабочим пространством.
             </p>
           </div>
-          {saveButton("Сохранить изменения")}
         </header>
         <section className="settings-card accounts-settings-card">
           <button
@@ -104,19 +115,46 @@ export default function SettingsView({
           >
             <Users size={20} aria-hidden="true" />
             <span>Аккаунты и подключения</span>
-            <ChevronDown size={18} aria-hidden="true" style={{transform:accountsExpanded ? "rotate(180deg)" : undefined}} />
+            <ChevronDown
+              size={18}
+              aria-hidden="true"
+              style={{
+                transform: accountsExpanded ? "rotate(180deg)" : undefined,
+              }}
+            />
           </button>
-          <p>Управление подключениями Telegram и Instagram. Ответ отправляется через аккаунт, в который написал клиент.</p>
-          {accountsExpanded && <div id="settings-account-connections">{accountsContent}</div>}
+          <p>
+            Управление подключениями Telegram и Instagram. Ответ отправляется
+            через аккаунт, в который написал клиент.
+          </p>
+          {accountsExpanded && (
+            <div id="settings-account-connections">{accountsContent}</div>
+          )}
         </section>
         <section className="settings-card">
           <h2>Push-уведомления</h2>
-          <p>Новые сообщения Telegram и Instagram, даже когда Jorik закрыт. Настройка действует для этого устройства.</p>
-          {push.hint ? <p>{push.hint}</p> : <button type="button" className="primary"
-            disabled={!push.ready || push.busy}
-            onClick={() => void (push.enabled ? push.disable() : push.enable())}>
-            {push.busy ? "Подождите…" : push.enabled ? "Отключить push-уведомления" : "Включить push-уведомления"}
-          </button>}
+          <p>
+            Новые сообщения Telegram и Instagram, даже когда Jorik закрыт.
+            Настройка действует для этого устройства.
+          </p>
+          {push.hint ? (
+            <p>{push.hint}</p>
+          ) : (
+            <button
+              type="button"
+              className="primary"
+              disabled={!push.ready || push.busy}
+              onClick={() =>
+                void (push.enabled ? push.disable() : push.enable())
+              }
+            >
+              {push.busy
+                ? "Подождите…"
+                : push.enabled
+                  ? "Отключить push-уведомления"
+                  : "Включить push-уведомления"}
+            </button>
+          )}
           {push.status && <p role="status">{push.status}</p>}
         </section>
         <section className="settings-card preferences-card">
@@ -216,14 +254,23 @@ export default function SettingsView({
                 чат.
               </p>
             </div>
-            <span className="slot-count">{slots.length} / {MAX_QUICK_REPLIES} шаблонов</span>
+            <span className="slot-count">
+              {slots.length} / {MAX_QUICK_REPLIES} шаблонов
+            </span>
           </header>
           <div className="settings-slots">
             {slots.map((slot, i) => (
               <fieldset key={slot.id}>
                 <legend>Слот {i + 1}</legend>
                 {quickReplyHotkey(i) && <kbd>{quickReplyHotkey(i)}</kbd>}
-                <button type="button" className="template-delete" aria-label={`Удалить шаблон ${i + 1}`} onClick={() => removeTemplate(slot.id)}><Trash2 size={16} /></button>
+                <button
+                  type="button"
+                  className="template-delete"
+                  aria-label={`Удалить шаблон ${i + 1}`}
+                  onClick={() => removeTemplate(slot.id)}
+                >
+                  <Trash2 size={16} />
+                </button>
                 <label>
                   Название кнопки
                   <input
@@ -254,16 +301,46 @@ export default function SettingsView({
               </fieldset>
             ))}
           </div>
-          <button type="button" className="template-add" disabled={slots.length >= MAX_QUICK_REPLIES} onClick={addTemplate}><Plus size={16} /> Добавить шаблон</button>
+          <button
+            type="button"
+            className="template-add"
+            disabled={slots.length >= MAX_QUICK_REPLIES}
+            onClick={addTemplate}
+          >
+            <Plus size={16} /> Добавить шаблон
+          </button>
           <small role="status">
             {saveStatus ||
               "Быстрые ответы автоматически сохраняются на сервере."}
           </small>
+          {saveStatus && !["Сохранено", "Сохранение…"].includes(saveStatus) && (
+            <button
+              type="button"
+              className="secondary template-save-retry"
+              disabled={retrying}
+              onClick={async () => {
+                if (retrying) return;
+                setRetrying(true);
+                try {
+                  await saveSlots();
+                } catch {
+                  /* The shared save status contains the error. */
+                } finally {
+                  setRetrying(false);
+                }
+              }}
+            >
+              {retrying ? "Сохраняем…" : "Повторить сохранение шаблонов"}
+            </button>
+          )}
         </section>
         <section className="settings-card profile-card">
           <header>
             <h2>Профиль и синхронизация</h2>
-            <p>Имя владельца и состояние соединения с сервером Jorik.</p>
+            <p>
+              Измените имя и нажмите «Сохранить имя». Остальные параметры
+              сохраняются в своих разделах.
+            </p>
           </header>
           <form
             onSubmit={(e) => {
@@ -278,6 +355,7 @@ export default function SettingsView({
                   required
                   maxLength={80}
                   value={name}
+                  disabled={busy}
                   onChange={(e) => {
                     setName(e.target.value);
                     setResult("");
@@ -285,10 +363,18 @@ export default function SettingsView({
                   aria-label="Отображаемое имя"
                   placeholder="Имя владельца или оператора"
                 />
-                {saveButton("Сохранить")}
+                {saveButton("Сохранить имя")}
               </div>
             </label>
           </form>
+          <p role="status">
+            {result && (
+              <>
+                {result === "Имя сохранено" && <Check size={15} />}
+                {result}
+              </>
+            )}
+          </p>
           <div className="settings-server">
             <div>
               <strong>
@@ -305,29 +391,25 @@ export default function SettingsView({
                 {mode === "demo" ? " Демонстрационный режим." : ""}
               </p>
             </div>
-
           </div>
         </section>
-        <footer className="settings-footer">
-          <p role="status">
-            {result && (
-              <>
-                {result === "Все настройки сохранены" && <Check size={15} />}
-                {result}
-              </>
-            )}
-          </p>
-          {saveButton("Сохранить все настройки")}
-        </footer>
         <ConversationTrash />
-        {onLogout && <section className="settings-card settings-session-card" aria-label="Выход из аккаунта">
-          <p>Приём сообщений продолжится на сервере после выхода.</p>
-          <button type="button" className="settings-logout" onClick={onLogout}>
-            <LogOut size={16} aria-hidden="true" />
-            Выйти из системы
-          </button>
-        </section>}
-
+        {onLogout && (
+          <section
+            className="settings-card settings-session-card"
+            aria-label="Выход из аккаунта"
+          >
+            <p>Приём сообщений продолжится на сервере после выхода.</p>
+            <button
+              type="button"
+              className="settings-logout"
+              onClick={onLogout}
+            >
+              <LogOut size={16} aria-hidden="true" />
+              Выйти из системы
+            </button>
+          </section>
+        )}
       </div>
     </div>
   );

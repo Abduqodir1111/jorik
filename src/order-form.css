@@ -25,9 +25,7 @@
 .compact-order-form .eyebrow {
   font-size: var(--font-caption);
 }
-.sheet-handle {
-  display: none;
-}
+
 .compact-order-form label,
 .compact-field {
   display: block;
@@ -377,17 +375,7 @@
     padding: 10px 12px;
     gap: 8px;
   }
-  .sheet-handle {
-    display: block;
-    position: absolute;
-    top: 5px;
-    left: calc(50% - 16px);
-    width: 32px;
-    height: 3px;
-    border-radius: 9px;
-    background: var(--line);
-    z-index: 3;
-  }
+
   .compact-order-drawer .compact-order-form > header {
     top: -10px;
     margin: -10px -12px 0;
@@ -433,6 +421,7 @@
 .compact-order-form .compact-grid { grid-template-columns:1fr 1fr; gap:12px; }
 .compact-order-form .order-identity { min-height:38px; padding:0 10px; border:1px solid var(--line); border-radius:12px; }
 .compact-order-form .order-identity > a { font-weight:700; }
+.compact-order-form .order-identity > .store-badge { max-width:55%; }
 .compact-order-drawer .compact-order-form input:not([type="checkbox"]):not([type="radio"]),.compact-order-drawer .compact-order-form select { height:38px; min-height:38px; border-radius:12px; }
 .compact-order-form .type-segments,.compact-order-form .compact-phone { height:38px; border-radius:12px; }
 .compact-order-form .compact-phone { font-family:var(--font-ui); }
@@ -476,3 +465,7 @@
 .compact-order-form .add-phone { justify-self:start; padding:0; color:var(--accent); font-size:var(--font-body); }
 .optional-phone-field { position:relative; padding-right:30px; min-width:0; }
 .optional-phone-remove { position:absolute; right:0; top:24px; padding:5px; color:var(--muted); }
+@media (max-width: 767px) {
+  .compact-order-form .type-segments { height: auto; }
+  .compact-order-form .type-segments button { min-height: 44px; }
+}
