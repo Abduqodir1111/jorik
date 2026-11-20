@@ -1,3 +1,5 @@
+import { InboxSnapshots } from "./inbox-sync.js";
+import type { InboxState } from "../shared/inbox-sync.js";
 import compress from "@fastify/compress";
 import { registerArchive, type ArchiveOptions } from "./archive-routes.js";
 import { MAX_QUICK_REPLIES } from "../shared/quick-replies.js";
@@ -92,8 +94,17 @@ export async function createApp(opts: {
     db.prepare("UPDATE outbox SET state='unknown' WHERE state='sending'").run();
   })();
 
+  let stateEpoch = 0;
+  app.addHook("onResponse", async (req, reply) => {
+    if (
+      !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
+      reply.statusCode < 400
+    )
+      stateEpoch++;
+  });
   let publishTimer: ReturnType<typeof setTimeout> | undefined;
   const publish = () => {
+    stateEpoch++;
     if (publishTimer || !clients.size) return;
     publishTimer = setTimeout(() => {
       publishTimer = undefined;
@@ -629,7 +640,7 @@ export async function createApp(opts: {
       );
     },
   );
-  app.get("/api/state", async () => ({
+  const getState = (): InboxState => ({
     quickRepliesVersion: hashToken(
       (
         db
@@ -660,7 +671,21 @@ export async function createApp(opts: {
         }[]
       ).map((s) => [s.key, s.value]),
     ),
-  }));
+  });
+  const inboxSnapshots = new InboxSnapshots(getState);
+  app.get("/api/state", async () => getState());
+  app.get("/api/inbox-sync", async (req, reply) => {
+    const { since } = z
+      .object({
+        since: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+      })
+      .parse(req.query);
+    reply.header("Cache-Control", "no-store");
+    return inboxSnapshots.read(since, stateEpoch);
+  });
   app.get("/api/search", async (req) => {
     const { q } = z.object({ q: z.string().max(200) }).parse(req.query);
     const rows = db
@@ -690,11 +715,9 @@ export async function createApp(opts: {
     "/api/conversations/:id/draft",
     async (req, reply) => {
       if (store.conversation(req.params.id).deletedAt)
-        return reply
-          .code(409)
-          .send({
-            error: "Сначала восстановите удалённый диалог в настройках.",
-          });
+        return reply.code(409).send({
+          error: "Сначала восстановите удалённый диалог в настройках.",
+        });
       const body = z
         .object({
           text: z.string().max(10000),

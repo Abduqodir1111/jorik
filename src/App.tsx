@@ -1,3 +1,4 @@
+import { InboxSyncClient } from "./inbox-sync";
 import {
   ConversationActions,
   DeleteConversationDialog,
@@ -365,8 +366,17 @@ export default function App() {
   }, []);
   const [localAccess, setLocalAccess] = useState(false);
   const notificationSound = useNotificationSound();
-  async function refresh() {
-    const s = await api("/state");
+  const [inboxSync] = useState(() => new InboxSyncClient((url) => api(url)));
+  const refreshOnceRef = useRef<() => Promise<void>>(async () => {});
+  const refreshQueue = useRef<(() => Promise<void>) | null>(null);
+  refreshOnceRef.current = refreshOnce;
+  function refresh() {
+    if (!refreshQueue.current)
+      refreshQueue.current = coalesceAsync(() => refreshOnceRef.current());
+    return refreshQueue.current();
+  }
+  async function refreshOnce() {
+    const s = await inboxSync.read();
     if (cacheMode.current !== s.mode) {
       let storage: Storage | undefined;
       try {
@@ -482,6 +492,7 @@ export default function App() {
   useEffect(() => {
     if (!auth) return;
     const events = new EventSource("/api/events");
+    let jobsNeeded = true;
     events.addEventListener("message-update", (event) => {
       try {
         patchMessage(JSON.parse((event as MessageEvent).data));
@@ -504,6 +515,7 @@ export default function App() {
       window.dispatchEvent(new Event("jorik:orders-changed")),
     );
     events.onopen = () => {
+      jobsNeeded = true;
       setOnline(true);
       window.dispatchEvent(new Event("jorik:orders-changed"));
     };
@@ -513,8 +525,11 @@ export default function App() {
       if (!active) return;
       await refresh();
       if (active && selectedRef.current) await history(selectedRef.current);
-      const jobs = await api<ArchiveJob[]>("/archive/jobs");
-      if (active) acceptArchiveJobs(jobs);
+      if (jobsNeeded) {
+        const jobs = await api<ArchiveJob[]>("/archive/jobs");
+        jobsNeeded = false;
+        if (active) acceptArchiveJobs(jobs);
+      }
     });
     events.onmessage = () => {
       setOnline(true);
@@ -674,6 +689,7 @@ export default function App() {
   async function logout() {
     await flushDrafts();
     await api("/logout", "POST");
+    inboxSync.reset();
     chatCache.current?.clear();
     chatCache.current = null;
     cacheMode.current = null;

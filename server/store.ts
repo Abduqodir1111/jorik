@@ -55,7 +55,7 @@ export class Store {
       this.db
         .prepare(
           conversationSelect +
-            " WHERE c.deleted_at IS NULL ORDER BY c.updated_at DESC",
+            " WHERE c.deleted_at IS NULL ORDER BY c.updated_at DESC,c.id ASC",
         )
         .all() as Conversation[]
     ).map((c) => ({ ...c, needsReply: c.unread > 0 }));
