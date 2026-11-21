@@ -363,9 +363,13 @@ export class InstagramIntegration {
             "UPDATE messages SET reply_to_external_id=? WHERE id=?",
           ).run(m.reply_to.mid, saved.id);
         }
+        this.saveMediaSources(saved.id, m.attachments?.data);
         const media = instagramAttachments(m.attachments?.data, saved.id);
         if (m.attachments) {
-          db.prepare("UPDATE messages SET attachments=?,text=? WHERE id=?").run(
+          // An empty history response does not revoke a webhook attachment.
+          db.prepare(
+            "UPDATE messages SET attachments=?,text=? WHERE id=? AND (? > 0 OR attachments='[]')",
+          ).run(
             JSON.stringify(media),
             m.message ||
               (media.length
@@ -378,6 +382,7 @@ export class InstagramIntegration {
                       : "Фотография"
                 : "[Вложение Instagram недоступно — откройте в Instagram]"),
             saved.id,
+            media.length,
           );
         }
         const read = db
@@ -847,9 +852,18 @@ export class InstagramIntegration {
                             }
                           : a.type === "audio" || a.type === "voice_media"
                             ? { audio_data: { url: a.payload?.url } }
-                            : a.type === "video"
+                            : a.type === "video" ||
+                                a.type === "ig_reel" ||
+                                a.type === "reel"
                               ? { video_data: { url: a.payload?.url } }
-                              : { image_data: { url: a.payload?.url } },
+                              : {
+                                  image_data: { url: a.payload?.url },
+                                  ...(["ig_post", "post"].includes(a.type) &&
+                                  typeof a.payload?.ig_post_media_id ===
+                                    "string"
+                                    ? { media_id: a.payload.ig_post_media_id }
+                                    : {}),
+                                },
                       ),
                     }
                   : undefined,
@@ -963,6 +977,23 @@ export class InstagramIntegration {
     if (!this.closed) this.store.changed();
     return { ok: true };
   }
+  private saveMediaSources(messageId: string, items?: InstagramMedia[]) {
+    const save = this.store.db.prepare(
+      `INSERT INTO instagram_media_sources(message_id,media_index,kind,url,media_id)
+       VALUES(?,?,?,?,?) ON CONFLICT(message_id,media_index) DO UPDATE SET
+       kind=excluded.kind,url=COALESCE(excluded.url,url),media_id=COALESCE(excluded.media_id,media_id)`,
+    );
+    for (const item of instagramMedia(items)) {
+      if (item.index <= 99)
+        save.run(
+          messageId,
+          item.index,
+          item.kind,
+          item.url || null,
+          item.mediaId ?? null,
+        );
+    }
+  }
   async media(messageId: string, index: number, range?: string) {
     const row = this.store.db
       .prepare(
@@ -974,14 +1005,57 @@ export class InstagramIntegration {
     if (range && !/^bytes=\d*-\d*$/.test(range))
       throw new Error("Некорректный диапазон видео.");
     // Refresh expiring CDN URLs without exposing the page token to the browser.
-    const data = await this.request(
-      `${encodeURIComponent(instagramGraphMessageId(row.external_id))}?fields=id,attachments`,
-    );
-    const item = instagramMedia(data.attachments?.data).find(
-      (a) => a.index === index,
-    );
+    let fresh: ReturnType<typeof instagramMedia>[number] | undefined;
+    try {
+      const data = await this.request(
+        `${encodeURIComponent(instagramGraphMessageId(row.external_id))}?fields=id,attachments`,
+      );
+      this.saveMediaSources(messageId, data.attachments?.data);
+      fresh = instagramMedia(data.attachments?.data).find(
+        (a) => a.index === index,
+      );
+    } catch (error) {
+      // History can omit shares or report an old message as deleted (code 100).
+      // Authentication/permission/rate-limit failures must retain their meaning.
+      if ((error as { graphCode?: number }).graphCode !== 100) throw error;
+    }
+    const saved = this.store.db
+      .prepare(
+        "SELECT kind,url,media_id AS mediaId FROM instagram_media_sources WHERE message_id=? AND media_index=?",
+      )
+      .get(messageId, index) as
+      | {
+          kind: "image" | "video" | "voice";
+          url: string | null;
+          mediaId: string | null;
+        }
+      | undefined;
+    const item = fresh ?? saved;
     if (!item) throw new Error("Meta больше не предоставляет это вложение.");
-    let url = item.url;
+    let candidateUrl = trustedInstagramMediaUrl(item.url);
+    const mediaId = saved?.mediaId;
+    if (mediaId && /^\d{1,32}$/.test(mediaId)) {
+      try {
+        const post = await this.request(
+          `${mediaId}?fields=media_type,media_url,thumbnail_url`,
+        );
+        const refreshed = trustedInstagramMediaUrl(
+          item.kind === "image" && post.media_type === "VIDEO"
+            ? post.thumbnail_url
+            : post.media_url,
+        );
+        if (refreshed) candidateUrl = refreshed;
+      } catch (error) {
+        if (
+          !candidateUrl ||
+          (error as { graphCode?: number }).graphCode === 190
+        )
+          throw error;
+      }
+    }
+    if (!candidateUrl)
+      throw new Error("Meta больше не предоставляет это вложение.");
+    let url: string = candidateUrl;
     let response: Response | undefined;
     for (let redirect = 0; redirect < 5; redirect++) {
       response = await (this.opts.fetcher ?? fetch)(url, {

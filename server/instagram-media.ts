@@ -6,10 +6,11 @@ export type InstagramMedia = {
     name?: string;
     address?: string;
   };
+  media_id?: string;
   mime_type?: string;
   file_url?: string;
   audio_data?: { url?: string };
-  image_data?: { url?: string };
+  image_data?: { url?: string; preview_url?: string };
   video_data?: { url?: string };
 };
 export function trustedInstagramMediaUrl(value: unknown): string | null {
@@ -44,11 +45,25 @@ export function instagramMedia(items: InstagramMedia[] = []) {
       item.audio_data?.url ||
       (item.mime_type?.startsWith("audio/") ? item.file_url : undefined);
     const kind = audioUrl ? "voice" : item.video_data ? "video" : "image";
+    const mediaId =
+      typeof item.media_id === "string" && /^\d{1,32}$/.test(item.media_id)
+        ? item.media_id
+        : undefined;
     const url = trustedInstagramMediaUrl(
-      audioUrl ?? item.video_data?.url ?? item.image_data?.url,
+      audioUrl ??
+        item.video_data?.url ??
+        item.image_data?.url ??
+        item.image_data?.preview_url,
     );
-    return url
-      ? [{ kind: kind as "image" | "video" | "voice", url, index }]
+    return url || mediaId
+      ? [
+          {
+            kind: kind as "image" | "video" | "voice",
+            url: url ?? "",
+            index,
+            mediaId,
+          },
+        ]
       : [];
   });
 }

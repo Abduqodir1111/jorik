@@ -207,3 +207,127 @@ test("Instagram media: refresh metadata, preserve unread, range proxy and accoun
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+test("shared post keeps server-side media after Graph omits attachments and refreshes the post URL", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jorik-ig-share-"));
+  const db = openDb(dir, "real"),
+    store = new Store(db);
+  let postReads = 0,
+    cdnReads = 0;
+  let authError = false;
+  const integration = new InstagramIntegration(store, {
+    token: "private-token",
+    receiveMode: "webhook",
+    fetcher: (async (url: string, options: RequestInit) => {
+      const u = new URL(url);
+      if (u.pathname.endsWith("/me"))
+        return Response.json({
+          id: "page",
+          instagram_business_account: { id: "shop", username: "shop" },
+        });
+      if (u.hostname === "lookaside.fbsbx.com") {
+        assert.equal(u.pathname, "/fresh-post");
+        assert.equal(new Headers(options.headers).has("authorization"), false);
+        cdnReads++;
+        return new Response(new Uint8Array([255, 216, 255, 217]), {
+          headers: { "Content-Type": "image/jpeg" },
+        });
+      }
+      if (u.pathname.endsWith("/123456789")) {
+        postReads++;
+        return Response.json({
+          media_type: "IMAGE",
+          media_url: "https://lookaside.fbsbx.com/fresh-post",
+        });
+      }
+      if (authError)
+        return Response.json({ error: { code: 190 } }, { status: 400 });
+      return Response.json({ id: "post-share" }); // Real Graph response: no attachments.
+    }) as typeof fetch,
+  });
+  try {
+    await integration.sync();
+    integration.receiveWebhook({
+      id: "shop",
+      messaging: [
+        {
+          sender: { id: "customer" },
+          recipient: { id: "shop" },
+          timestamp: Date.now(),
+          message: {
+            mid: "post-share",
+            attachments: [
+              {
+                type: "ig_post",
+                payload: {
+                  url: "https://lookaside.fbsbx.com/expired",
+                  ig_post_media_id: "123456789",
+                  title: "Book",
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const c = store.conversations()[0],
+      m = store.messages(c.id)[0];
+    assert.equal(m.attachments.length, 1);
+    assert.equal(m.attachments[0].kind, "image");
+    assert.ok(!JSON.stringify(m).includes("expired"));
+    const source = db
+      .prepare(
+        "SELECT url,media_id FROM instagram_media_sources WHERE message_id=?",
+      )
+      .get(m.id) as any;
+    assert.equal(source.media_id, "123456789");
+    const media = await integration.media(m.id, 0);
+    const chunks = [];
+    for await (const chunk of media.stream) chunks.push(chunk);
+    assert.equal(Buffer.concat(chunks).length, 4);
+    assert.equal(postReads, 1);
+    assert.equal(cdnReads, 1);
+    assert.equal(store.conversation(c.id).unread, 1);
+    assert.equal(store.messages(c.id).length, 1);
+    await assert.rejects(integration.media(m.id, 1));
+    // An incomplete repeat/history event must not erase an existing preview.
+    integration.receiveWebhook({
+      id: "shop",
+      messaging: [
+        {
+          sender: { id: "customer" },
+          recipient: { id: "shop" },
+          timestamp: Date.now(),
+          message: { mid: "post-share", attachments: [] },
+        },
+      ],
+    });
+    assert.equal(store.messages(c.id)[0].attachments.length, 1);
+    assert.equal(store.conversation(c.id).unread, 1);
+    authError = true;
+    await assert.rejects(integration.media(m.id, 0));
+    assert.equal(cdnReads, 1);
+  } finally {
+    await integration.close();
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Instagram preview URLs are validated and shared media IDs cannot become arbitrary Graph routes", () => {
+  const valid = instagramAttachments(
+    [{ image_data: { preview_url: "https://lookaside.fbsbx.com/preview" } }],
+    "message",
+  );
+  assert.equal(valid.length, 1);
+  assert.equal(
+    instagramAttachments(
+      [{ media_id: "../me", image_data: { url: "https://evil.test/x" } }],
+      "message",
+    ).length,
+    0,
+  );
+  assert.equal(
+    instagramAttachments([{ media_id: "123456789" }], "message").length,
+    1,
+  );
+});
